@@ -3,8 +3,8 @@ percentage and direction.
 
 F: next command(s) will be forward
 B: next command(s) will be backward
-1-9: next command(s) will be 10-90%
-0: next command(s) will be 100%
+0-9: next command(s) will be 0-90%
+:: (colon) next command(s) will be 100% (colon is the ascii character after 9)
 L: set Left motor settings based on existing settings
 R: set Right motor settings based on existing settings
 G: Go, 1 pulse, based on existing settings of L and R motors
