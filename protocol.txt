@@ -1,0 +1,17 @@
+The remote decides what it should be sending, in terms of motor
+percentage and direction.
+
+F: next command(s) will be forward
+B: next command(s) will be backward
+1-9: next command(s) will be 10-90%
+0: next command(s) will be 100%
+L: set Left motor settings based on existing settings
+R: set Right motor settings based on existing settings
+G: Go, 1 pulse, based on existing settings of L and R motors
+
+(: rotate head left 1 pulse
+): rotate head right 1 pulse
+^: move gun up one pulse
+v: move gun down one pulse
+
+Still need to figure out speech and stuff, if we do that.
