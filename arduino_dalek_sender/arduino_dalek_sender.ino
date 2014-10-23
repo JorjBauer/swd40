@@ -87,9 +87,10 @@ int HandleJoystick()
    * Full down: 797
    */
 
-  /* If the joystick is quiescent, then return. */
+  /* If the joystick is centered, then return. */
   if (lrAnalog >= 492 && lrAnalog <= 540 &&
       udAnalog >= 420 && udAnalog <= 521) {
+        // Dead stop: nothing to do
         return 0;
   }
   
@@ -119,16 +120,35 @@ int HandleJoystick()
    float new_leftmotor;
    float new_rightmotor;
    
+   if (joyY == 0) {
+     // rotation special case
+     if (joyX < 0) {
+       new_rightmotor = abs(joyX);
+       new_leftmotor = 0;
+     } else if (joyX > 0) {
+       new_leftmotor = joyX;
+       new_rightmotor = 0;
+     } else {
+       // dead stop special case
+       new_leftmotor = new_rightmotor = 0;
+     }
+   } else {
+     // forward or backward movement case
     new_leftmotor = joyY;
-    if (joyX > 0) {
-      new_leftmotor *= (1.0 - joyX);
+    if (joyY != 0) {
+      if (joyX > 0) {
+        new_leftmotor *= (1.0 - joyX);
+      }
     }
      
     new_rightmotor = joyY;
-    if (joyX < 0) {
-      new_rightmotor *= (1.0 - (abs(joyX)));
+    if (joyY != 0) {
+      if (joyX < 0) {
+        new_rightmotor *= (1.0 - (abs(joyX)));
+      }
     }
-  
+   }
+      
    /* Compare the new states with the last sent states. If they differ, then send the new states. */
    int new_lm_state = (int)(10.0 * (new_leftmotor + 0.05));
    int new_rm_state = (int)(10.0 * (new_rightmotor + 0.05));
