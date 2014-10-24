@@ -11,8 +11,10 @@ const int rightButtonPin = 4;
 
 #define RF_BROADCASTID 0
 
-#define kLEFT 0
-#define kRIGHT 1
+
+// SCALE_FACTOR is the percentage of full speed we want to operate at
+#define SCALE_FACTOR 1.0
+
 #define kFORWARD 0
 #define kBACKWARD 1
 
@@ -67,6 +69,58 @@ void SendNewState(char motor, int state)
 }
 
 
+// Given an angle (degrees, where 0 is straight forward?) and an acceleration 
+// (range 0..100; the distance of the polar coordinate, basically) return 
+// an optimal l_motor and r_motor (range -100..100) speed to achieve that goal
+void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
+{
+  /*
+  degs = ((degs + 180) % 360) - 180; // Normalize to [-180, 180)
+  accel = min(max(0, accel), 100);         // Normalize to [0, 100]
+  int v_a = accel * (45 - degs % 90) / 45;
+  int v_b = min(100, 2 * r + v_a, 2 * r - v_a);
+  if (degs < -90) {
+    *l_motor = -v_b;
+    *r_motor = -v_a;
+  } else if (degs < 0) {
+    *l_motor = -v_a;
+    *r_motor = v_b;
+  } else if (degs < 90) {
+    *l_motor = v_b;
+    *r_motor = v_a;
+  } else {
+    *l_motor = v_a;
+    *r_motor = -v_b;
+  }
+  */
+  
+  /* The above might be more correct, but this is more legible: */
+  
+  if (degs >= 0 && degs <= 90) {
+    *l_motor = accel;
+    *r_motor = accel * sin(radians(2*degs - 90));
+  } else if (degs < 0 && degs >= -90) {
+    *r_motor = -accel;
+    *l_motor = accel * sin(radians(2*degs + 90));
+  } else if (degs > 90 && degs <= 180) {
+    *r_motor = accel;
+    *l_motor = accel * sin(radians(2*degs - 90));
+  } else if (degs < -90 && degs >= -180) {
+    *l_motor = -accel;
+    *r_motor = accel * sin(radians(2*degs + 90));
+  }
+  
+  if (*l_motor > 100)
+    *l_motor = 100;
+  if (*l_motor < -100)
+    *l_motor = -100;
+  if (*r_motor > 100)
+    *r_motor = 100;
+  if (*r_motor < -100)
+    *r_motor = -100;
+  
+}
+
 int HandleJoystick()
 {
   int lrAnalog = analogRead(A0);
@@ -97,7 +151,7 @@ int HandleJoystick()
   /* calculate joystick position, in percentages. */
   float joyX = 0, joyY = 0;
   if (lrAnalog < 492) {
-    joyX = - (((float)lrAnalog - 174.0) / 492.0);
+    joyX = - (1.0 - (((float)lrAnalog - 174.0) / 492.0));
     if (joyX < -1) 
       joyX = -1;
   } else if (lrAnalog > 540) {
@@ -107,51 +161,28 @@ int HandleJoystick()
   }
   
   if (udAnalog < 420) {
-    joyY = - (((float)udAnalog - 156.0) / 420.0);
-    if (joyY < -1)
-      joyY = -1;
-  } else if (udAnalog > 521) {
-    joyY = ((float)udAnalog - 521.0) / (797.0 - 521.0);
+    joyY = 1.0 - (((float)udAnalog - 156.0) / 420.0);
     if (joyY > 1)
       joyY = 1;
+  } else if (udAnalog > 521) {
+    joyY = - ((float)udAnalog - 521.0) / (797.0 - 521.0);
+    if (joyY < -1)
+      joyY = -1;
   }
-   
+  
+  /* convert that to a polar coordinate - angle and distance. */
+  float distance = sqrt(joyX*joyX + joyY*joyY) * 100.0 * SCALE_FACTOR;
+  float angle = degrees(atan2(joyY, joyX));
+  
    /* Determine what the new lm_state and rm_state should be. */
-   float new_leftmotor;
-   float new_rightmotor;
+   int new_leftmotor;
+   int new_rightmotor;
    
-   if (joyY == 0) {
-     // rotation special case
-     if (joyX < 0) {
-       new_rightmotor = abs(joyX);
-       new_leftmotor = 0;
-     } else if (joyX > 0) {
-       new_leftmotor = joyX;
-       new_rightmotor = 0;
-     } else {
-       // dead stop special case
-       new_leftmotor = new_rightmotor = 0;
-     }
-   } else {
-     // forward or backward movement case
-    new_leftmotor = joyY;
-    if (joyY != 0) {
-      if (joyX > 0) {
-        new_leftmotor *= (1.0 - joyX);
-      }
-    }
-     
-    new_rightmotor = joyY;
-    if (joyY != 0) {
-      if (joyX < 0) {
-        new_rightmotor *= (1.0 - (abs(joyX)));
-      }
-    }
-   }
-      
+   OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
+   
    /* Compare the new states with the last sent states. If they differ, then send the new states. */
-   int new_lm_state = (int)(10.0 * (new_leftmotor + 0.05));
-   int new_rm_state = (int)(10.0 * (new_rightmotor + 0.05));
+   int new_lm_state = new_leftmotor / 10;
+   int new_rm_state = new_rightmotor / 10;
 
    if (lm_state != new_lm_state) {
      SendNewState('L', new_lm_state);
@@ -216,7 +247,7 @@ void rf_send(const char data)
   while (!rf12_canSend()) {
     rf12_recvDone();
   }
-
+  
   rf12_sendStart(2, &data, 1);
   rf12_sendWait(1);
 }

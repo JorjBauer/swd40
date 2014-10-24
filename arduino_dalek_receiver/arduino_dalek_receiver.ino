@@ -30,8 +30,8 @@ DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
 
 // Speeds are a max of 400, min of -400
 #define MAX_SPEED 400
-// Divide any backward-motion speeds by 4, because the Dalek is top-heavy on the back
-#define REVERSE_DIVISOR 4
+// Divide any backward-motion speeds by 2, because the Dalek is top-heavy on the back
+#define REVERSE_DIVISOR 2
 
 unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
@@ -104,6 +104,7 @@ void MakeMotorsGo(int left_motor, int right_motor)
     return;
   }
   
+#if 0
   if (left_out || right_out ) {
     // If it's not purely rotation, then we need to also take in to account 
     // that the Dalek is top-heavy. Don't go backward too fast.
@@ -115,8 +116,9 @@ void MakeMotorsGo(int left_motor, int right_motor)
       right_out /= REVERSE_DIVISOR;
     }
   }
-  
-  md.setSpeeds(left_out, right_out);
+#endif
+
+  md.setSpeeds(right_out, left_out);
   
   SetTimer(&MotorTimer);
 }
