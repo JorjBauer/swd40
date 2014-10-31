@@ -7,7 +7,7 @@ DualMC33926MotorShield md;
 
 #define FLOAT_TIME 10
 
-#define TURN_SPEED 180
+#define TURN_SPEED 160
 
 unsigned long ShoulderTimer = 0;
 

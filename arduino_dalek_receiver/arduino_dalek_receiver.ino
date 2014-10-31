@@ -18,8 +18,17 @@
 #define SF 2 // originally pin 12; re-soldered the circuit
 DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
 
+#define musicCtl1 A2
+#define musicCtl2 A3
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
+
+// fixme; these constants belong somewhere else
+#define MUSIC_NONE 0
+#define MUSIC_INTER1 1
+#define MUSIC_INTER2 2
+#define MUSIC_GUN 3
+
 
 // FLOAT_TIME is how long we should continue to obey a pulse that came in
 #define FLOAT_TIME 100
@@ -35,6 +44,7 @@ DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
 
 unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
+unsigned long musicTimer = 0;
 
 /* cached settings from last update of remote */
 #define kFORWARD 0
@@ -78,6 +88,16 @@ void setup()
   
   pinMode(shoulderLeftPin, OUTPUT);
   pinMode(shoulderRightPin, OUTPUT);
+  pinMode(musicCtl1, OUTPUT);
+  pinMode(musicCtl2, OUTPUT);
+  digitalWrite(musicCtl1, LOW);
+  digitalWrite(musicCtl2, LOW);
+}
+
+void startMusic(uint8_t which)
+{
+  digitalWrite(musicCtl1, which % 2);
+  digitalWrite(musicCtl2, which / 2);
 }
 
 void SetTimer(unsigned long *t)
@@ -138,7 +158,12 @@ void loop()
     digitalWrite(shoulderLeftPin, LOW);
     digitalWrite(shoulderRightPin, LOW);
   }
-
+  
+  if (musicTimer && musicTimer < millis()) {
+    musicTimer = 0;
+    startMusic(MUSIC_NONE); // clear music pins
+  }
+  
   /* See if we have new RF commands waiting to be received */
   
   if (rf12_recvDone()) {
@@ -203,6 +228,13 @@ void loop()
           SetTimer(&shoulderTimer);
           digitalWrite(shoulderLeftPin, LOW);
           digitalWrite(shoulderRightPin, HIGH);
+          break;
+          
+        case 'i':
+        case 'I':
+        case '*':
+          startMusic( rf12_data[0] == 'i' ? 1 : rf12_data[0] == 'I' ? 2 : 3 );
+          musicTimer = millis() + 500; // yes, longer than FLOAT_TIME.
           break;
       }
     }

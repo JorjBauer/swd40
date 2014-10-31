@@ -6,11 +6,16 @@
 #define RF_NODEID 1
 #define RF_GROUPID 212
 
+#define LED_PIN 6
+#define SpeedSwitch 5
+ #define kSlowMode 1
+ #define kFastMode 0
+#define noiseButtonPin 2
+
 const int leftButtonPin = 3;
 const int rightButtonPin = 4;
 
 #define RF_BROADCASTID 0
-
 
 // SCALE_FACTOR is the percentage of full speed we want to operate at
 #define SCALE_FACTOR 1.0
@@ -26,6 +31,11 @@ int p_state = -1;   // motor percentage; 0 to 10
 int lm_state = -9999; // -10 to +10
 int rm_state = -9999; // -10 to +10
 
+/* LED pulsing variables */
+int led_brightness = 255;
+int led_direction = -5;
+unsigned long led_timer = 0;
+
 void setup()
 {
   Serial.begin(115200);
@@ -40,6 +50,14 @@ void setup()
   digitalWrite(8, HIGH); // fake +5v for joystick
   pinMode(7, OUTPUT);
   digitalWrite(7, LOW); // fake GND for joystick
+  
+  pinMode(noiseButtonPin, INPUT);
+  digitalWrite(noiseButtonPin, HIGH); // pull-up enabled
+  
+  pinMode(LED_PIN, OUTPUT);
+  analogWrite(LED_PIN, 100);
+  pinMode(SpeedSwitch, INPUT);
+  digitalWrite(SpeedSwitch, HIGH); // pull-up enabled
 }
 
 void SendNewState(char motor, int state)
@@ -180,6 +198,12 @@ int HandleJoystick()
    
    OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
    
+   if (digitalRead(SpeedSwitch) == kSlowMode) {
+     // Slow mode: decrease motor speed by half
+     new_leftmotor /= 2;
+     new_rightmotor /= 2;
+   }
+   
    /* Compare the new states with the last sent states. If they differ, then send the new states. */
    int new_lm_state = new_leftmotor / 10;
    int new_rm_state = new_rightmotor / 10;
@@ -221,13 +245,37 @@ int HandleShoulder()
    return 0;
 }
 
+int HandleNoise()
+{
+  int noiseState = digitalRead(noiseButtonPin);
+#if 0
+  if (noiseState) {
+    rf_send('*');
+    return 1;
+  }
+#endif  
+  return 0;
+}
+
 void loop()
 {
+  if (millis() >= led_timer) {
+    led_brightness += led_direction;
+    if (led_brightness <= 0 || led_brightness >= 255) {
+      led_direction = -led_direction;
+    }
+    analogWrite(LED_PIN, led_brightness);
+    led_timer = millis() + 30;
+  }
+  
   int didSend = HandleJoystick();
   didSend |= HandleShoulder();
+  didSend |= HandleNoise();
   
   if (didSend) {
     delay(100);
+    led_brightness = 255;
+    led_direction = -5;
   }
 }
 
