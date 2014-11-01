@@ -10,10 +10,15 @@
 #define SpeedSwitch 5
  #define kSlowMode 1
  #define kFastMode 0
-#define noiseButtonPin 2
 
 const int leftButtonPin = 3;
 const int rightButtonPin = 4;
+
+// Constants returned by Handle* functions to denote what they did.
+// These are bit-fields (1,2,4,8...)
+#define DID_NOTHING 0
+#define DID_SOMETHING 1
+#define DID_OVERRIDE_JOYSTICK 2
 
 #define RF_BROADCASTID 0
 
@@ -50,9 +55,6 @@ void setup()
   digitalWrite(8, HIGH); // fake +5v for joystick
   pinMode(7, OUTPUT);
   digitalWrite(7, LOW); // fake GND for joystick
-  
-  pinMode(noiseButtonPin, INPUT);
-  digitalWrite(noiseButtonPin, HIGH); // pull-up enabled
   
   pinMode(LED_PIN, OUTPUT);
   analogWrite(LED_PIN, 100);
@@ -139,10 +141,12 @@ void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
   
 }
 
-int HandleJoystick()
+uint8_t ReadJoystick(float *x, float *y)
 {
   int lrAnalog = analogRead(A0);
   int udAnalog = analogRead(A1);
+
+  *x = *y = 0;
   
   /* Manual constants from tuning the joystick:
    * 
@@ -163,7 +167,7 @@ int HandleJoystick()
   if (lrAnalog >= 492 && lrAnalog <= 540 &&
       udAnalog >= 420 && udAnalog <= 521) {
         // Dead stop: nothing to do
-        return 0;
+        return DID_NOTHING;
   }
   
   /* calculate joystick position, in percentages. */
@@ -187,7 +191,20 @@ int HandleJoystick()
     if (joyY < -1)
       joyY = -1;
   }
-  
+
+  *x = joyX;
+  *y = joyY;
+  return DID_SOMETHING;
+}
+
+int HandleJoystick()
+{
+  float joyX, joyY;
+  if (ReadJoystick(&joyX, &joyY) == DID_NOTHING) {
+    // Dead stop; nothing to do
+    return DID_NOTHING;
+  }
+
   /* convert that to a polar coordinate - angle and distance. */
   float distance = sqrt(joyX*joyX + joyY*joyY) * 100.0 * SCALE_FACTOR;
   float angle = degrees(atan2(joyY, joyX));
@@ -221,7 +238,37 @@ int HandleJoystick()
   /* If we get here, the motors aren't quiescent, and we've told the remote end how we want them set; pulse them. */   
    rf_send('G'); // one pulse
    
-   return 1; // we did something
+   return DID_SOMETHING;
+}
+
+void HandleMusic()
+{
+  // Read from the joystick what we want to do
+  float joyX, joyY;
+  ReadJoystick(&joyX, &joyY);
+
+  if (joyX > 0.6 && abs(joyY) < 0.6) {
+    // right
+    if (digitalRead(SpeedSwitch) == kSlowMode)
+      rf_send("M4", 2);
+    else
+      rf_send("M1", 2);
+  } else if (joyX < -0.6 && abs(joyY) < 0.6) {
+    // left
+    if (digitalRead(SpeedSwitch) == kSlowMode)
+      rf_send("M5", 2);
+    else
+      rf_send("M2", 2);
+  } else if (abs(joyX) < 0.6 && joyY > 0.6) {
+    // up
+    if (digitalRead(SpeedSwitch) == kSlowMode)
+      rf_send("M6", 2);
+    else
+      rf_send("M3", 2);
+  } else if (abs(joyX) < 0.6 && joyY < -0.6) {
+    // down
+    rf_send('m'); // stop music
+  }
 }
 
 int HandleShoulder()
@@ -230,31 +277,21 @@ int HandleShoulder()
   int rightState = digitalRead(rightButtonPin);
    
    if (leftState && rightState) {
-     // ignore double-presses.
-     return 0;
+     // A double-press means we want to invoke music.
+     HandleMusic();
+     // Regardless of what that does, override the joystick.
+     return DID_OVERRIDE_JOYSTICK;
    }
    
    if (leftState) {
      rf_send('(');
-     return 1;
+     return DID_SOMETHING;
    } else if (rightState) {
      rf_send(')');
-     return 1;
+     return DID_SOMETHING;
    }
    
-   return 0;
-}
-
-int HandleNoise()
-{
-  int noiseState = digitalRead(noiseButtonPin);
-#if 0
-  if (noiseState) {
-    rf_send('*');
-    return 1;
-  }
-#endif  
-  return 0;
+   return DID_NOTHING;
 }
 
 void loop()
@@ -267,10 +304,11 @@ void loop()
     analogWrite(LED_PIN, led_brightness);
     led_timer = millis() + 30;
   }
-  
-  int didSend = HandleJoystick();
-  didSend |= HandleShoulder();
-  didSend |= HandleNoise();
+
+  int didSend = HandleShoulder();
+  if (!(didSend & DID_OVERRIDE_JOYSTICK)) {
+    didSend |= HandleJoystick();
+  }
   
   if (didSend) {
     delay(100);

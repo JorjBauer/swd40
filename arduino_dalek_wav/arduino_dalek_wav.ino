@@ -1,5 +1,6 @@
 #include <WaveHC.h>
 #include <WaveUtil.h>
+#include <SoftwareSerial.h>
 
 /* two control pins */
 #define ctl1 A0
@@ -11,14 +12,18 @@ FatReader root;   // This holds the information for the volumes root directory
 FatReader file;   // This object represent the WAV file 
 WaveHC wave;      // This is the only wave (audio) object, since we will only play one at a time
 
-// Number of files.
-#define FILE_COUNT 3
+#define CMD_STOP 255
 
-char *fileNames[FILE_COUNT] = { "INTER1.WAV", "INTER2.WAV", "GUN.WAV" };
+// Number of files.
+#define FILE_COUNT 7
+
+char *fileNames[FILE_COUNT] = { "INTER1.WAV", "INTER2.WAV", "INTER3.WAV", "INTER4.WAV", "GUN.WAV", "EXTERM.WAV", "THEME.WAV" };
 
 // index of WAV files in the root directory
 uint16_t fileIndex[FILE_COUNT];
 
+
+SoftwareSerial softSerial(ctl1, ctl2); // RX, TX
 
 /*
  * Define macro to put error messages in flash memory
@@ -28,6 +33,7 @@ uint16_t fileIndex[FILE_COUNT];
 //////////////////////////////////// SETUP
 void setup() {
   Serial.begin(115200);
+  softSerial.begin(9600);
 
   if (!card.init()) error("card.init");
 
@@ -47,24 +53,29 @@ void setup() {
 
 uint8_t readPins()
 {
-  uint8_t ret = 0;
-  ret |= ctl1;
-  ret |= (ctl2 << 1);
+  if (softSerial.available()) {
+    uint8_t c = softSerial.read();
+    Serial.println(c);
+    if (c >= '1' && c <= '9') {
+      return c - '1' + 1;
+    } else if (c == 0) {
+      return CMD_STOP;
+    }
+  }
+  
+  return 0;
 }
 
 //////////////////////////////////// LOOP
 void loop() 
 {
   uint8_t cmd = readPins();
-  switch (cmd) {
-    case 0:
-      delay(100);
-      break;
-    case 1:
-    case 2:
-    case 3:
-      playByIndex(cmd);
-      break;
+  if (cmd && cmd != CMD_STOP) {
+    playByIndex(cmd);
+  } else if (cmd == CMD_STOP) {
+    wave.stop();
+  } else {
+    delay(100);
   }
 }
 
@@ -98,6 +109,7 @@ void indexFiles(void) {
   char name[10];
   
   for (uint8_t i=0; i<FILE_COUNT; i++) {
+    Serial.println(fileNames[i]);
     strcpy(name, fileNames[i]); // FIXME: strcpy_P? And PSTRs?
     if (!file.open(root,name)) error("open by name");
     fileIndex[i] = root.readPosition()/32-1;
@@ -112,6 +124,12 @@ void playByIndex(uint8_t i) {
   // start time
   uint32_t t = millis();
   
+  Serial.print("Starting index ");
+  Serial.println(i);
+  
+  if (wave.isplaying)
+    wave.stop();
+  
   // open by index
   if (!file.open(root, fileIndex[i])) {
     error("open by index");
@@ -122,12 +140,12 @@ void playByIndex(uint8_t i) {
   wave.play();
   
   // print time to open file and start play
-  Serial.println(millis() - t);
+//  Serial.println(millis() - t);
   
   // stop after PLAY_TIME ms
-  while (wave.isplaying) {
-    delay(100);
-  }
+//  while (wave.isplaying) {
+//    delay(100);
+//  }
   
 //  while((millis() - t) < PLAY_TIME);
 //  wave.stop();
