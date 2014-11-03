@@ -34,7 +34,7 @@ unsigned long led_timer = 0;
 
 void setup() {
   Wire.begin();
-  nunchuk_setpowerpins();
+  nunchuck_setpowerpins();
   ctrl.begin();
   ctrl.update();
 
@@ -192,14 +192,14 @@ int HandleMovement()
 
   // Turn x and y in to polar coordinates
   float distance = sqrt(x*x + y*y);
-  float angle = degrees(atan2(joyY, joyX));
+  float angle = degrees(atan2(y, x));
 
   int new_leftmotor;
   int new_rightmotor;
 
   OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
 
-  if (slowMode) {
+  if (slow_mode) {
     new_leftmotor /= 2;
     new_rightmotor /= 2;
   }
@@ -245,7 +245,7 @@ int HandleSounds()
   // Sound-related buttons, in order of priority (only one will send at a time)
 
   if (ctrl.lzPressed() || ctrl.rzPressed()) {
-    rf_send("m");
+    rf_send('m');
     ret = 1;
   } else if (ctrl.leftShoulderPressed()) {
     // firing noise
@@ -279,6 +279,26 @@ int HandleSounds()
   }
 
   return ret;
+}
+
+void rf_send(const char *data, int datasize)
+{
+  while (!rf12_canSend()) {
+    rf12_recvDone();
+  }
+
+  rf12_sendStart(2, data, datasize);
+  rf12_sendWait(1);
+}
+
+void rf_send(const char data)
+{
+  while (!rf12_canSend()) {
+    rf12_recvDone();
+  }
+
+  rf12_sendStart(2, &data, 1);
+  rf12_sendWait(1);
 }
 
 void loop() {
