@@ -1,0 +1,51 @@
+SparkFun PowerCell set @ 3.3v output
+
+Arduino Pro Mini, 3.3v
+
+A5 aka SCL
+A4 aka SDA
+RFM12B connected as normal (9-13)
+
+---
+
+-, +: slow and fast mode toggle (defaults to slow)
+
+right joystick: drive
+left joystick: turn shoulders L/R
+
+ZL, ZR: cancel playback of sounds
+
+Shoulder L: firing noise
+Shoulder R: 'exterminate'
+
+x,y,a,b: interstitial noises
+
+D-pad: theme music (any direction; 3 ways unused)
+home: unused
+
+---
+
+
+Classic controller: 00 00 A4 20 01 01
+Bit
+
+7    | 6     |    5  | 4    3    2    1    0
+  RX<4:3>    |     LX <5:0>
+  RX<2:1>    |     LY <5:0>
+RX<0>|     LT<4:3>   |     RY <4:0>
+       LT<2:0>       |     RT <4:0>
+BDR  | BDD   |  BLT  | B-  BH   B+   BRT   [1]
+BZL    BB       BY     BA  BX   BZR  BDL   BDU
+
+LX,LY are the left Analog Stick X and Y (0-63), RX and RY are the
+right Analog Stick X and Y (0-31), and LT and RT are the Left and
+Right Triggers (0-31). The left Analog Stick has twice the precision
+of the other analog values.
+
+BD{L,R,U,D} are the D-Pad direction buttons. B{ZR,ZL,A,B,X,Y,+,H,-}
+are the discrete buttons. B{LT,RT} are the digital button click of LT
+and RT. All buttons are 0 when pressed.
+
+Nintendo games calibrate the center position of the Analog Sticks upon
+power-up or insertion of the Classic Controller.
+
