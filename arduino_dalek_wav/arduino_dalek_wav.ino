@@ -15,9 +15,9 @@ WaveHC wave;      // This is the only wave (audio) object, since we will only pl
 #define CMD_STOP 255
 
 // Number of files.
-#define FILE_COUNT 7
+#define FILE_COUNT 10
 
-char *fileNames[FILE_COUNT] = { "INTER1.WAV", "INTER2.WAV", "INTER3.WAV", "INTER4.WAV", "GUN.WAV", "EXTERM.WAV", "THEME.WAV" };
+char *fileNames[FILE_COUNT] = { "0.WAV", "1.WAV", "2.WAV", "3.WAV", "4.WAV", "5.WAV", "6.WAV", "7.WAV", "8.WAV", "9.WAV" };
 
 // index of WAV files in the root directory
 uint16_t fileIndex[FILE_COUNT];
@@ -56,8 +56,8 @@ uint8_t readPins()
   if (softSerial.available()) {
     uint8_t c = softSerial.read();
     Serial.println(c);
-    if (c >= '1' && c <= '9') {
-      return c - '1' + 1;
+    if (c >= '0' && c <= '9') {
+      return c - '0';
     } else if (c == 0) {
       return CMD_STOP;
     }

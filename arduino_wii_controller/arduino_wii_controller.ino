@@ -17,6 +17,8 @@ int lcx, lcy, rcx, rcy;
 #define kFORWARD 0
 #define kBACKWARD 1
 
+// #define DEBUG
+
 int slow_mode = 1; // Slow or fast mode? Slow by default.
 
 /* Protocol states initialized to invalid values */
@@ -33,8 +35,10 @@ int led_direction = -5;
 unsigned long led_timer = 0;
 
 void setup() {
+  Serial.begin(57600);
+  
   Wire.begin();
-  nunchuck_setpowerpins();
+//  nunchuck_setpowerpins();
   ctrl.begin();
   ctrl.update();
 
@@ -48,6 +52,17 @@ void setup() {
   lcy = ctrl.leftStickY();
   rcx = ctrl.rightStickX();
   rcy = ctrl.rightStickY();
+
+#ifdef DEBUG  
+  Serial.print("Startup centering: left ");
+  Serial.print(lcx);
+  Serial.print(",");
+  Serial.print(lcy);
+  Serial.print("; right ");
+  Serial.print(rcx);
+  Serial.print(",");
+  Serial.println(rcy);
+#endif
 }
 
 void SendNewState(char motor, int state)
@@ -131,17 +146,17 @@ void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
 int HandleSlowFastMode()
 {
   if (ctrl.selectPressed()) { // "select" is also "-"
-    slow_mode = 0;
-    return 1;
-  } else if (ctrl.startPressed()) { // "start" is also "+"
     slow_mode = 1;
-    return 1;
+    return 0; // nothing sent
+  } else if (ctrl.startPressed()) { // "start" is also "+"
+    slow_mode = 0;
+    return 0; // we still didn't send anything to the remote end.
   }
 
-  return 0;
+  return 0; // nothing sent to remote end.
 }
 
-uint8_t ReadJoystick(float *x, float *y)
+uint8_t ReadRightJoystick(float *x, float *y)
 {
   int lrAnalog = ctrl.rightStickX();
   int udAnalog = ctrl.rightStickY();
@@ -167,19 +182,21 @@ uint8_t ReadJoystick(float *x, float *y)
   if (lrAnalog < rcx - RIGHT_CENTER_RANGE) {
     // Left-leaning
     float range = (rcx - RIGHT_CENTER_RANGE);
-    *x = -((float)lrAnalog / range);
+    *x = -(1.0 - ((float)lrAnalog / range));
   } else if (lrAnalog > rcx + RIGHT_CENTER_RANGE) {
     // Right-leaning
     float range = 31.0 - (rcx + RIGHT_CENTER_RANGE);
-    *x = (((float)lrAnalog - (float)rcx + (float)RIGHT_CENTER_RANGE ) / range);
+    *x = (((float)lrAnalog - ((float)rcx + (float)RIGHT_CENTER_RANGE) ) / range);
   }
 
   if (udAnalog < rcy - RIGHT_CENTER_RANGE) {
+    // down-leaning
     float range = (rcy - RIGHT_CENTER_RANGE);
-    *y = ((float)udAnalog / range);
+    *y =  -(1.0 - ((float)udAnalog / range));
+ 
   } else if (udAnalog > rcy + RIGHT_CENTER_RANGE) {
     float range = 31.0 - (rcy + RIGHT_CENTER_RANGE);
-    *y = -(((float)lrAnalog - (float)rcx + (float)RIGHT_CENTER_RANGE ) / range);
+    *y = (float)(udAnalog - rcy - RIGHT_CENTER_RANGE) / range;
   }
 
   return 1;
@@ -188,10 +205,10 @@ uint8_t ReadJoystick(float *x, float *y)
 int HandleMovement()
 {
   float x, y;
-  ReadJoystick(&x, &y);
+  ReadRightJoystick(&x, &y);
 
   // Turn x and y in to polar coordinates
-  float distance = sqrt(x*x + y*y);
+  float distance = sqrt(x*x + y*y) * 100.0;
   float angle = degrees(atan2(y, x));
 
   int new_leftmotor;
@@ -203,12 +220,16 @@ int HandleMovement()
     new_leftmotor /= 2;
     new_rightmotor /= 2;
   }
+  
+  if (new_leftmotor == 0 && new_rightmotor == 0) {
+    return 0;
+  }
 
   // Compare the new states with the last states. If they differ, then
   // send the new states to the other end.
   int new_lm_state = new_leftmotor / 10;
   int new_rm_state = new_rightmotor / 10;
-
+  
   if (lm_state != new_lm_state) {
     SendNewState('L', new_lm_state);
     lm_state = new_lm_state;
@@ -227,11 +248,11 @@ int HandleMovement()
 
 int HandleShoulder()
 {
-  if (ctrl.leftStickX() < lcx - LEFT_CENTER_RANGE) {
-    rf_send('(');
-    return 1;
-  } else if (ctrl.leftStickX() > lcx + LEFT_CENTER_RANGE) {
+  if (ctrl.leftStickX() < (lcx - LEFT_CENTER_RANGE)) {
     rf_send(')');
+    return 1;
+  } else if (ctrl.leftStickX() > (lcx + LEFT_CENTER_RANGE)) {
+    rf_send('(');
     return 1;
   }
 
@@ -255,10 +276,17 @@ int HandleSounds()
     // "Exterminate!"
     rf_send("M5", 2);
     ret = 1;
-  } else if (ctrl.leftDPressed() || ctrl.rightDPressed() ||
-	     ctrl.upDPressed() || ctrl.downDPressed()) {
-    // theme music
+  } else if (ctrl.leftDPressed()) {
     rf_send("M6", 2);
+    ret = 1;
+  } else if (ctrl.rightDPressed()) {
+    rf_send("M7", 2);
+    ret = 1;
+  } else if (ctrl.upDPressed()) {
+    rf_send("M8", 2);
+    ret = 1;
+  } else if (ctrl.downDPressed()) {
+    rf_send("M9", 2);
     ret = 1;
   } else if (ctrl.xPressed()) {
     // interstitial1
@@ -283,6 +311,9 @@ int HandleSounds()
 
 void rf_send(const char *data, int datasize)
 {
+#ifdef DEBUG
+  Serial.println(data);
+#endif
   while (!rf12_canSend()) {
     rf12_recvDone();
   }
@@ -293,6 +324,9 @@ void rf_send(const char *data, int datasize)
 
 void rf_send(const char data)
 {
+#ifdef DEBUG
+  Serial.println(data);
+#endif
   while (!rf12_canSend()) {
     rf12_recvDone();
   }

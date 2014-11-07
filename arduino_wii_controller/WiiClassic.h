@@ -1,42 +1,29 @@
 /*
  * Wii Classic -- Use a Wii Classic Controller
  * by Tim Hirzel http://www.growdown.com
- * 
- * 
+ *
+ *
  * This code owes thanks to the code by these authors:
  * Tod E. Kurt, http://todbot.com/blog/
  *
  * The Wii Nunchuck reading code is taken from Windmeadow Labs
  * http://www.windmeadow.com/node/42
- * 
+ *
  * and the reference document on the wii linux site:
  * http://www.wiili.org/index.php/Wiimote/Extension_Controllers/Classic_Controller
- *
- * 2009/10/04 Modified Micono Utilities.(http://micono.cocolog-nifty.com)
- *
  */
 
-#include <Arduino.h>
+#include <Wire.h>
 
 
 #ifndef WiiClassic_h
 #define WiiClassic_h
 
-// Uses port C (analog in) pins as power & ground for Nunchuck
-static void nunchuck_setpowerpins()
-{
-#define pwrpin PORTC3
-#define gndpin PORTC2
-    DDRC |= _BV(pwrpin) | _BV(gndpin);
-    PORTC &=~ _BV(gndpin);
-    PORTC |=  _BV(pwrpin);
-    delay(100);  // wait for things to stabilize        
-}
 
 class WiiClassic {    
     private:
         byte cnt;
-        uint8_t status[4];		// array to store wiichuck output
+        uint8_t status[4];              // array to store wiichuck output
         byte averageCounter;
         //int accelArray[3][AVERAGE_N];  // X,Y,Z
 
@@ -46,41 +33,61 @@ class WiiClassic {
 
     public:
 
-        void begin() 
+        void begin()
         {
             Wire.begin();
             cnt = 0;
             averageCounter = 0;
-            Wire.beginTransmission (0x52);	// transmit to device 0x52
-            Wire.write (0x40);		// sends memory address
-            Wire.write (byte(0x00));		// sends memory address
-            Wire.endTransmission ();	// stop transmitting
+            
+            /* old way -- jorj */
+#if 0
+            Wire.beginTransmission (0x52);      // transmit to device 0x52
+            Wire.write (0x40);           // sends memory address
+            Wire.write (0x00);           // sends memory address
+            Wire.endTransmission ();    // stop transmitting
+#endif
+
+            /* new way -- jorj */
+#if 1
+  Wire.beginTransmission (0x52);
+  Wire.write (0xF0);
+  Wire.write (0x55);
+  Wire.endTransmission ();
+  Wire.beginTransmission (0x52);
+  Wire.write (0xFB);
+  Wire.write (0x00);
+  Wire.endTransmission ();
+  Wire.beginTransmission (0x52);
+  Wire.write (0xFA);
+  Wire.endTransmission ();
+#endif
+
             lastButtons[0] = 0xff;
             lastButtons[1] = 0xff;
             buttons[0] = 0xff;
             buttons[1] = 0xff;
 
-            update();         
+            update();        
 
         }
 
 
         void update() {
 
-            Wire.requestFrom (0x52, 6);	// request data from nunchuck
+            Wire.requestFrom (0x52, 6); // request data from nunchuck
             while (Wire.available ()) {
                 // receive byte as an integer
                 if (cnt < 4) {
-                    status[cnt] = _nunchuk_decode_byte (Wire.read()); //_nunchuk_decode_byte () 
+                    status[cnt] = Wire.read(); //jorj
                 } else {
                     lastButtons[cnt-4] = buttons[cnt-4];
-                    buttons[cnt-4] =_nunchuk_decode_byte (Wire.read());
+                    buttons[cnt-4] =Wire.read(); // jorj
                 }
                 cnt++;
             }
             if (cnt > 5) {
                 _send_zero(); // send the request for next bytes
-                cnt = 0;                   
+                cnt = 0;                  
             }
         }
 
@@ -161,20 +168,20 @@ class WiiClassic {
         }
 
         int leftStickX() {
-            return  ( (status[0] & 0x3f) >> 1); //Modified 
+            return  ( (status[0] & 0x3f) );
         }
 
         int leftStickY() {
-            return  ((status[1] & 0x3f)) >> 1; //Modified 
+            return  ((status[1] & 0x3f));      
         }
 
         int rightStickX() {
-            return (((status[0] & 0xc0) >> 3) + ((status[1] & 0xc0) >> 5) +  ((status[2] & 0x80) >> 7));
+            return ((status[0] & 0xc0) >> 3) + ((status[1] & 0xc0) >> 5) +  ((status[2] & 0x80) >> 7);
 
         }
 
         int rightStickY() {
-            return (status[2] & 0x1f);  	
+            return status[2] & 0x1f;   
         }
 
 
@@ -185,17 +192,11 @@ class WiiClassic {
         }
 
 
-        byte _nunchuk_decode_byte (byte x)
-        {
-            x = (x ^ 0x17) + 0x17;
-            return x;
-        }
-
         void _send_zero()
         {
-            Wire.beginTransmission (0x52);	// transmit to device 0x52
-            Wire.write (byte(0x00));		// sends one byte
-            Wire.endTransmission ();	// stop transmitting
+            Wire.beginTransmission (0x52);      // transmit to device 0x52
+            Wire.write (0x00);           // sends one byte
+            Wire.endTransmission ();    // stop transmitting
         }
 
 };
@@ -203,3 +204,4 @@ class WiiClassic {
 
 
 #endif
+
