@@ -33,8 +33,14 @@ int fb_state = -1;  // forward/backward state; 0/1
 int p_state = -1;   // motor percentage; 0 to 10
 
 /* Remote motor states (should they be pulsed right now). Again, init'd to invalid values. */
-int lm_state = -9999; // -10 to +10
-int rm_state = -9999; // -10 to +10
+int lm_state = 0; // -10 to +10
+int rm_state = 0; // -10 to +10
+
+/* Vars to slowly ramp motors up/down */
+unsigned long last_motor_update_time = 0;
+unsigned char last_motor_counter = 0;
+int target_lm_state = 0;
+int target_rm_state = 0;
 
 /* LED pulsing variables */
 int led_brightness = 255;
@@ -227,18 +233,8 @@ int HandleJoystick()
    int new_lm_state = new_leftmotor / 10;
    int new_rm_state = new_rightmotor / 10;
 
-   if (lm_state != new_lm_state) {
-     SendNewState('L', new_lm_state);
-     lm_state = new_lm_state;
-   }
-   
-   if (rm_state != new_rm_state) {
-     SendNewState('R', new_rm_state);
-     rm_state = new_rm_state;
-   }
-
-  /* If we get here, the motors aren't quiescent, and we've told the remote end how we want them set; pulse them. */   
-   rf_send('G'); // one pulse
+    target_lm_state = new_lm_state;
+    target_rm_state = new_rm_state;
    
    return DID_SOMETHING;
 }
@@ -298,6 +294,43 @@ int HandleShoulder()
 
 void loop()
 {
+  // Handle motor ramp up/down
+  if (millis() >= last_motor_update_time + 40) {
+
+    // Once every 40ms, move 10% toward our goal speeds for both motors
+      if (lm_state != target_lm_state) {
+        int new_lm_state;
+        if (target_lm_state > lm_state) {
+          new_lm_state = lm_state + 1;
+        } else {
+          new_lm_state = lm_state - 1;
+        }
+        SendNewState('L', new_lm_state);
+        lm_state = new_lm_state;
+      }
+      if (rm_state != target_rm_state) {
+        int new_rm_state;
+        if (target_rm_state > rm_state) {
+          new_rm_state = rm_state + 1;
+        } else {
+          new_rm_state = rm_state - 1;
+        }
+        SendNewState('R', new_rm_state);
+        rm_state = new_rm_state;
+      }
+
+    last_motor_counter++;
+
+    if ((last_motor_counter & 1) == 1) {
+      // Once every 100ms, if either motor should be moving, pulse the drives
+      if (lm_state || rm_state) {
+        rf_send('G');
+      }
+    }
+    
+    last_motor_update_time = millis();
+  }
+
   if (millis() >= led_timer) {
     led_brightness += led_direction;
     if (led_brightness <= 0 || led_brightness >= 255) {
@@ -313,7 +346,7 @@ void loop()
   }
   
   if (didSend) {
-    delay(100);
+    delay(15);
     led_brightness = 255;
     led_direction = -5;
   }
