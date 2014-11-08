@@ -217,8 +217,10 @@ int HandleMovement()
   OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
 
   if (slow_mode) {
-    new_leftmotor /= 2;
-    new_rightmotor /= 2;
+    new_leftmotor *= 2;
+    new_leftmotor /= 3;
+    new_rightmotor *= 2;
+    new_rightmotor /= 3;
   }
   
   if (new_leftmotor == 0 && new_rightmotor == 0) {

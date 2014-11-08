@@ -217,8 +217,10 @@ int HandleJoystick()
    
    if (digitalRead(SpeedSwitch) == kSlowMode) {
      // Slow mode: decrease motor speed by half
-     new_leftmotor /= 2;
-     new_rightmotor /= 2;
+     new_leftmotor *= 2;
+     new_leftmotor /= 3;
+     new_rightmotor *= 2;
+     new_rightmotor /= 3;
    }
    
    /* Compare the new states with the last sent states. If they differ, then send the new states. */
