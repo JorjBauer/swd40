@@ -322,7 +322,7 @@ void loop()
     last_motor_counter++;
 
     if ((last_motor_counter & 1) == 1) {
-      // Once every 100ms, if either motor should be moving, pulse the drives
+      // Once every 80ms, if either motor should be moving, pulse the drives
       if (lm_state || rm_state) {
         rf_send('G');
       }

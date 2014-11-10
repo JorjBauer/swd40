@@ -32,7 +32,7 @@ DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
 
 
 // FLOAT_TIME is how long we should continue to obey a pulse that came in
-#define FLOAT_TIME 100
+#define FLOAT_TIME 200
 
 // RF channel information
 #define RF_NODEID 2

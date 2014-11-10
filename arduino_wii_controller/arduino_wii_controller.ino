@@ -26,8 +26,16 @@ int fb_state = -1;  // forward/backward state; 0/1
 int p_state = -1;   // motor percentage; 0 to 10
 
 /* Remote motor states (should they be pulsed right now). Again, init'd to invalid values. */
-int lm_state = -9999; // -10 to +10
-int rm_state = -9999; // -10 to +10
+int lm_state = 0; // -10 to +10
+int rm_state = 0; // -10 to +10
+
+/* Vars to slowly ramp motors up/down */
+unsigned long last_motor_update_time = 0;
+unsigned char last_motor_counter = 0;
+int target_lm_state = 0;
+int target_rm_state = 0;
+
+unsigned long last_data_update = 0;
 
 /* LED pulsing variables */
 int led_brightness = 255;
@@ -35,23 +43,26 @@ int led_direction = -5;
 unsigned long led_timer = 0;
 
 void setup() {
+#ifdef DEBUG
   Serial.begin(57600);
-  
+  Serial.println("init");
+#endif
+
   Wire.begin();
 //  nunchuck_setpowerpins();
   ctrl.begin();
   ctrl.update();
-
-  rf12_initialize(RF_NODEID, RF12_433MHZ, RF_GROUPID);
-
-  pinMode(LED_PIN, OUTPUT);
-  analogWrite(LED_PIN, 100);
 
   // Read the center positions of the joysticks on start-up
   lcx = ctrl.leftStickX();
   lcy = ctrl.leftStickY();
   rcx = ctrl.rightStickX();
   rcy = ctrl.rightStickY();
+
+  rf12_initialize(RF_NODEID, RF12_433MHZ, RF_GROUPID);
+
+  pinMode(LED_PIN, OUTPUT);
+  analogWrite(LED_PIN, 100);
 
 #ifdef DEBUG  
   Serial.print("Startup centering: left ");
@@ -77,6 +88,9 @@ void SendNewState(char motor, int state)
   }
 
   int pct_want = abs(state);
+  if (pct_want > 10) {
+    pct_want = 10;
+  }
 
   if (fb_want != fb_state) {
     rf_send(fb_want == kFORWARD ? 'F' : 'B');
@@ -224,6 +238,7 @@ int HandleMovement()
   }
   
   if (new_leftmotor == 0 && new_rightmotor == 0) {
+    target_lm_state = target_rm_state = 0;
     return 0;
   }
 
@@ -232,19 +247,9 @@ int HandleMovement()
   int new_lm_state = new_leftmotor / 10;
   int new_rm_state = new_rightmotor / 10;
   
-  if (lm_state != new_lm_state) {
-    SendNewState('L', new_lm_state);
-    lm_state = new_lm_state;
-  }
-
-  if (rm_state != new_rm_state) {
-    SendNewState('R', new_rm_state);
-    rm_state = new_rm_state;
-  }
-
-  // Motor settings are in sync now, so send a Go pulse
-  rf_send('G');
-
+  target_lm_state = new_lm_state;
+  target_rm_state = new_rm_state;
+  
   return 1;
 }
 
@@ -269,6 +274,9 @@ int HandleSounds()
 
   if (ctrl.lzPressed() || ctrl.rzPressed()) {
     rf_send('m');
+    // Force the next motor update to stop the motors, too
+    target_lm_state = target_rm_state = 0;
+    lm_state = rm_state = 1;
     ret = 1;
   } else if (ctrl.leftShoulderPressed()) {
     // firing noise
@@ -338,6 +346,44 @@ void rf_send(const char data)
 }
 
 void loop() {
+  // Handle motor ramp up/down
+  if (millis() >= last_motor_update_time + 40) {
+    
+    // Once every 40ms, move 10% toward our goal speeds for both motors
+    
+    if (lm_state != target_lm_state) {
+      int new_lm_state = lm_state;
+      if (target_lm_state > lm_state) {
+        new_lm_state ++;
+      } else {
+        new_lm_state --;
+      }
+      SendNewState('L', new_lm_state);
+      lm_state = new_lm_state;
+    }
+    if (rm_state != target_rm_state) {
+      int new_rm_state = rm_state;
+      if (target_rm_state > rm_state) {
+        new_rm_state ++;
+      } else {
+        new_rm_state --;
+      }
+      SendNewState('R', new_rm_state);
+      rm_state = new_rm_state;
+    }
+
+    // Once every 80ms, if either motor should be moving, pulse the drives
+    last_motor_counter++;
+    if ((last_motor_counter & 1) == 1) {
+      if (lm_state || rm_state) {
+        rf_send('G');
+      }
+    }
+    
+    last_motor_update_time = millis();
+  }
+
+
   // Handle LED pulsing
   if (millis() >= led_timer) {
     led_brightness += led_direction * (1 + (1 - slow_mode)); // pulse faster in fast mode
@@ -353,20 +399,21 @@ void loop() {
     led_timer = millis() + 30;
   }
 
-  // Read new values from the controller
-  ctrl.update();
-
-  int didSend = HandleMovement();
-  didSend |= HandleSlowFastMode();
-  didSend |= HandleShoulder();
-  didSend |= HandleSounds();
-
-  if (didSend) {
-    delay(100);
-    led_brightness = 255;
-    led_direction = -5;
-  } else {
-    delay(20); // don't overload the Wii controller...
+  // Periodically update the data
+  if (millis() >= last_data_update + 100) {
+    // Read new values from the controller
+    ctrl.update();
+  
+    int didSend = HandleMovement();
+    didSend |= HandleSlowFastMode();
+    didSend |= HandleShoulder();
+    didSend |= HandleSounds();
+  
+    if (didSend) {
+      led_brightness = 255;
+      led_direction = -5;
+    }
+    last_data_update = millis();
   }
 
 }
