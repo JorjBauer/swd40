@@ -105,58 +105,6 @@ void SendNewState(char motor, int state)
   rf_send(motor);
 }
 
-// Given an angle (degrees, where 0 is straight forward?) and an acceleration
-// (range 0..100; the distance of the polar coordinate, basically) return
-// an optimal l_motor and r_motor (range -100..100) speed to achieve that goal
-void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
-{
-  /*
-  degs = ((degs + 180) % 360) - 180; // Normalize to [-180, 180)
-  accel = min(max(0, accel), 100);         // Normalize to [0, 100]
-  int v_a = accel * (45 - degs % 90) / 45;
-  int v_b = min(100, 2 * r + v_a, 2 * r - v_a);
-  if (degs < -90) {
-  *l_motor = -v_b;
-  *r_motor = -v_a;
-  } else if (degs < 0) {
-  *l_motor = -v_a;
-  *r_motor = v_b;
-  } else if (degs < 90) {
-  *l_motor = v_b;
-  *r_motor = v_a;
-  } else {
-  *l_motor = v_a;
-  *r_motor = -v_b;
-  }
-  */
-
-  /* The above might be more correct, but this is more legible: */
-
-  if (degs >= 0 && degs <= 90) {
-    *l_motor = accel;
-    *r_motor = accel * sin(radians(2*degs - 90));
-  } else if (degs < 0 && degs >= -90) {
-    *r_motor = -accel;
-    *l_motor = accel * sin(radians(2*degs + 90));
-  } else if (degs > 90 && degs <= 180) {
-    *r_motor = accel;
-    *l_motor = accel * sin(radians(2*degs - 90));
-  } else if (degs < -90 && degs >= -180) {
-    *l_motor = -accel;
-    *r_motor = accel * sin(radians(2*degs + 90));
-  }
-
-  /* Make sure to cap the motors at their peak values... */
-  if (*l_motor > 100)
-    *l_motor = 100;
-  if (*l_motor < -100)
-    *l_motor = -100;
-  if (*r_motor > 100)
-    *r_motor = 100;
-  if (*r_motor < -100)
-    *r_motor = -100;
-}
-
 int HandleSlowFastMode()
 {
   if (ctrl.selectPressed()) { // "select" is also "-"
@@ -170,6 +118,8 @@ int HandleSlowFastMode()
   return 0; // nothing sent to remote end.
 }
 
+// ReadRightJoystick returns 0 if the joyistick is centered, and 1 if not.
+// It puts the percentage of full x/y (from -1.0 to 1.0) in *x and *y.
 uint8_t ReadRightJoystick(float *x, float *y)
 {
   int lrAnalog = ctrl.rightStickX();
@@ -216,19 +166,58 @@ uint8_t ReadRightJoystick(float *x, float *y)
   return 1;
 }
 
+// ... and the same for the Left, whose range is [0,63].
+uint8_t ReadLeftJoystick(float *x, float *y)
+{
+  int lrAnalog = ctrl.leftStickX();
+  int udAnalog = ctrl.leftStickY();
+
+  *x = *y = 0;
+  // Turn all of this in to a percentage of left (negative) or right (positive)
+  // and up (positive) or down (negative), from -1.0 to 1.0.
+
+  // If the joystick is dead center, then it's nothing.
+  if (lrAnalog >= (lcx - LEFT_CENTER_RANGE) &&
+      lrAnalog <= (lcx + LEFT_CENTER_RANGE) &&
+      udAnalog >= (lcy - LEFT_CENTER_RANGE) &&
+      udAnalog <= (lcy + LEFT_CENTER_RANGE)) {
+    // Dead center; do nothing.
+    return 0;
+  }
+
+  if (lrAnalog < lcx - LEFT_CENTER_RANGE) {
+    // Left-leaning
+    float range = (lcx - LEFT_CENTER_RANGE);
+    *x = -(1.0 - ((float)lrAnalog / range));
+  } else if (lrAnalog > lcx + LEFT_CENTER_RANGE) {
+    // Right-leaning
+    float range = 63.0 - (lcx + LEFT_CENTER_RANGE);
+    *x = (((float)lrAnalog - ((float)lcx + (float)LEFT_CENTER_RANGE) ) / range);
+  }
+
+  if (udAnalog < lcy - LEFT_CENTER_RANGE) {
+    // down-leaning
+    float range = (lcy - LEFT_CENTER_RANGE);
+    *y =  -(1.0 - ((float)udAnalog / range));
+ 
+  } else if (udAnalog > lcy + LEFT_CENTER_RANGE) {
+    float range = 63.0 - (lcy + LEFT_CENTER_RANGE);
+    *y = (float)(udAnalog - lcy - LEFT_CENTER_RANGE) / range;
+  }
+
+  return 1;  
+}
+
+
+
 int HandleMovement()
 {
   float x, y;
   ReadRightJoystick(&x, &y);
+  int new_rightmotor = (int)(100.0 * y);
 
-  // Turn x and y in to polar coordinates
-  float distance = sqrt(x*x + y*y) * 100.0;
-  float angle = degrees(atan2(y, x));
-
-  int new_leftmotor;
-  int new_rightmotor;
-
-  OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
+  ReadLeftJoystick(&x, &y);
+  int new_leftmotor = (int)(100.0 * y);
 
   if (slow_mode) {
     new_leftmotor *= 2;
