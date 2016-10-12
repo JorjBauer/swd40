@@ -1,4 +1,4 @@
-At the moment, there are three Arduino boards in play in this system.
+At the moment, there are four Arduino boards in play in this system.
 
 The first is the remote control - the "sender", contained in
 arduino_dalek_sender. This has a low-quality analog joystick, buttons
@@ -22,3 +22,7 @@ The third is the shoulder motor driver. It's a third-party Arduino Uno
 clone, driving another Pololu motor shield. It receives pulses from
 the receiver board on two digital pins, telling it to perform left and
 right rotation of the shoulder motor.
+
+The fourth is the music player, which is in the head. It's an Arduino
+Uno with an Adafruit WAV shield, an SD card, a small amp, and a
+beefy speaker salvaged from an old set of computer speakers.
