@@ -1,0 +1,30 @@
+A1
+  Arduino Uno
+  Code: arduino_dalek_sender.ino
+  runs from +12v
+  Daughterboards: RFM12B (homemade)
+  Purpose: primary controller. Listens on RF; drives primary motor controllers;
+    delegates commands to other arduinos over serial.
+
+
+A2
+  Arduino Uno clone
+  Code: arduino_dalek_shouldermotor.ino
+  runs from +12v
+  Daughterboards: Pololu motor shield
+  Purpose: secondary controller. When told over serial, will run the shoulder 
+    motors and the gun aim motor.
+
+A3
+  Arduino Uno
+  Code: arduino_dalek_wav.ino
+  runs from +12v
+  Daughterboards: Adafruit WAV shield
+  Purpose: primary audio engine; also runs the mist generator, fan to blow 
+    it, and LEDs
+
+
+Not listed:
+
+remote control ("sender")
+  Wii controller version of the sender
