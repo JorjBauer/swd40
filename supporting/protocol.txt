@@ -1,17 +1,36 @@
 The remote decides what it should be sending, in terms of motor
 percentage and direction.
 
+This protocol is correct as of 10/12/2016.
+
 F: next command(s) will be forward
 B: next command(s) will be backward
 0-9: next command(s) will be 0-90%
 :: (colon) next command(s) will be 100% (colon is the ascii character after 9)
-L: set Left motor settings based on existing settings
-R: set Right motor settings based on existing settings
-G: Go, 1 pulse, based on existing settings of L and R motors
+L: set Left motor settings based on current settings
+R: set Right motor settings based on current settings
+G: Go, 1 pulse, based on current settings of both L and R motors
+   The drive system will carry this pulse forward for 200mS. As long as a 
+   stream of 'G' pulses comes in faster than one every 200mS, the motors will 
+   run continuously.
 
 (: rotate head left 1 pulse
 ): rotate head right 1 pulse
 ^: move gun up one pulse
 v: move gun down one pulse
 
-Still need to figure out speech and stuff, if we do that.
+m: hard-stop motors (Brake) and stop all sound that might be playing
+   (Brake will stay on for 200mS, just like 'G' pulses.)
+
+M#: play a sound with the given # (0-9)
+    0: x button
+    1: y button
+    2: A button
+    3: B button
+    4: left shoulder button (firing noise)
+    5: right shoulder button ("exterminate!")
+    6: left D
+    7: right D
+    8: up D
+    9: down D
+

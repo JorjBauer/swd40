@@ -2,33 +2,56 @@
 #include <util/crc16.h>
 #include <util/parity.h>
 #include <avr/pgmspace.h>
-#include "DualMC33926MotorShield.h"
 
 #undef DEBUG
 
-#define M1DIR 7
-#define M2DIR 8
-#define M1PWM 5 // originally pin 9; re-soldered the circuit
-#define M1FB A0
-#define M2DIR 8
-#define M2PWM 6 // originally pin 10; re-soldered the circuit
-#define M2FB A1
-#define D2 4
-#define SF 2 // originally pin 12; re-soldered the circuit
-DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
+/* Pins used.
+ *  
+ *  Note that some of these are embedded in Jeelib's RF12.cpp. There's no way to 
+ *  programmatically check that they're correct here :(
+ *  
+ *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
+ *   1 Serial Out (to music board)
+ *   2 
+ *   3 RFM12 SPI_SS
+ *   4 RFM12 SPI_MISO
+ *   5 RFM12 SPI_MOSI
+ *   6 RFM12 SPI_SCK
+ *   7
+ *   8
+ *   9 RFM12 RFM_IRQ
+ *  10 M1THROTTLE (PWM)
+ *  11 M2THROTTLE (PWM)
+ *  12 M1DIR
+ *  13 M2DIR
+ *  14/A0 motorKeyPin  
+ *  15/A1 motorBrakePin
+ *  16/A2 gunUpPin
+ *  17/A3 gunDownPin
+ *  18/A4 shoulderLeftPin
+ *  19/A5 shoulderRightPin
+ *
+ *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
+ */
+
+#define M1DIR 12
+#define M2DIR 13
+#define M1THROTTLE 10 // must be a PWM pin
+#define M2THROTTLE 11 // must be a PWM pin
+#define MotorKeyPin A0
+#define MotorBrakePin A1
 
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
 
+#define gunUpPin A2
+#define gunDownPin A3
+
+#define MaxThrottleVoltage 4.0
+#define MOTORMAX 204      // approximately 4v on the PWM.
+
 // fixme; these constants belong somewhere else
 #define MUSIC_NONE 0
-#define MUSIC_INTER1 '1'
-#define MUSIC_INTER2 '2'
-#define MUSIC_INTER3 '3'
-#define MUSIC_INTER4 '4'
-#define MUSIC_GUN '5'
-#define MUSIC_EXTERM '6'
-#define MUSIC_THEME '7'
 
 
 // FLOAT_TIME is how long we should continue to obey a pulse that came in
@@ -38,13 +61,10 @@ DualMC33926MotorShield md(M1DIR, M1PWM, M1FB, M2DIR, M2PWM, M2FB, D2, SF);
 #define RF_NODEID 2
 #define RF_GROUPID 212
 
-// Speeds are a max of 400, min of -400
-#define MAX_SPEED 400
-// Divide any backward-motion speeds by 2, because the Dalek is top-heavy on the back
-#define REVERSE_DIVISOR 2
-
 unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
+unsigned long brakeTimer = 0;
+unsigned long gunTimer = 0;
 
 /* cached settings from last update of remote */
 #define kFORWARD 0
@@ -59,11 +79,23 @@ int right_motor = 0; // current setting, -10 to +10
 void setup()
 {
   Serial.begin(9600);
-  md.init();
+
   rf12_initialize(RF_NODEID, RF12_433MHZ, RF_GROUPID);
   
   pinMode(shoulderLeftPin, OUTPUT);
   pinMode(shoulderRightPin, OUTPUT);
+  pinMode(gunUpPin, OUTPUT);
+  pinMode(gunDownPin, OUTPUT);
+
+  pinMode(M1DIR, OUTPUT);
+  pinMode(M2DIR, OUTPUT);
+  pinMode(M1THROTTLE, OUTPUT);
+  pinMode(M2THROTTLE, OUTPUT);
+  pinMode(MotorKeyPin, OUTPUT);
+  pinMode(MotorBrakePin, OUTPUT);
+
+  setMotorSpeeds(0, 0);
+  digitalWrite(MotorKeyPin, HIGH); // assert the key (we're ready to run!)
 }
 
 void startMusic(uint8_t which)
@@ -76,42 +108,49 @@ void SetTimer(unsigned long *t)
   *t = millis() + FLOAT_TIME;
 }
 
+void setBrake(bool state)
+{
+  digitalWrite(MotorBrakePin, state);
+}
+
+// Given a motor speed in percent (from -100 to 100), enable the appropriate motor settings.
+void setMotorSpeeds(int left_motor, int right_motor)
+{
+  if (left_motor < 0) {
+    digitalWrite(M1DIR, HIGH);
+  } else {
+    digitalWrite(M1DIR, LOW);
+  }
+
+  analogWrite(M1THROTTLE, map(abs(left_motor), 0, 100, 0, MOTORMAX));
+
+  if (right_motor < 0) {
+    digitalWrite(M2DIR, HIGH);
+  } else {
+    digitalWrite(M2DIR, LOW);
+  }
+
+  analogWrite(M2THROTTLE, map(abs(right_motor), 0, 100, 0, MOTORMAX));
+}
+
 void MakeMotorsGo(int left_motor, int right_motor)
 {
-  // map v from [-10..10] to [-MAX_SPEED..MAX_SPEED]
-  // and then we need to pfutz with it a little.
-  int left_out = map(left_motor, -10, 10, -MAX_SPEED, MAX_SPEED);
-  int right_out = map(right_motor, -10, 10, -MAX_SPEED, MAX_SPEED);
+  // map v from [-10..10] to a percentage from [-100..100]
+  int left_out = map(left_motor, -10, 10, -100, 100);
+  int right_out = map(right_motor, -10, 10, -100, 100);
 
-  // safety catch for low rouding errors...
+  // safety catch for low rouding errors. If we're near zero, assume it should be zero.
+  // FIXME: arbitrary constants - this was 5 when MAX_SPEED was 400, so maybe this should be 2 now?
   if (abs(left_out) < 5)
     left_out = 0;
   if (abs(right_out) < 5)
     right_out = 0;
     
-  // if it's a no-op, then shut down the motors and we're done.
-  if (left_out == 0 && right_out == 0) {
-    md.setSpeeds(0, 0);
-    return;
+  setMotorSpeeds(right_out, left_out);
+  if (left_out != 0 || right_out != 0) {
+    // If either motor is engaged, then we start the timer
+    SetTimer(&MotorTimer);
   }
-  
-#if 0
-  if (left_out || right_out ) {
-    // If it's not purely rotation, then we need to also take in to account 
-    // that the Dalek is top-heavy. Don't go backward too fast.
-    
-    if (left_out < 0) {
-      left_out /= REVERSE_DIVISOR;
-    }
-    if (right_out < 0) {
-      right_out /= REVERSE_DIVISOR;
-    }
-  }
-#endif
-
-  md.setSpeeds(right_out, left_out);
-  
-  SetTimer(&MotorTimer);
 }
 
 void loop()
@@ -119,8 +158,7 @@ void loop()
   /* Spin down the motors if their timers have expired */
   if (MotorTimer && MotorTimer < millis()) {
     MotorTimer = 0;
-    md.setM1Speed(0);
-    md.setM2Speed(0);
+    setMotorSpeeds(0, 0);
   }
 
   /* Same with the signaling for the shoulder motors */  
@@ -128,6 +166,19 @@ void loop()
     shoulderTimer = 0;
     digitalWrite(shoulderLeftPin, LOW);
     digitalWrite(shoulderRightPin, LOW);
+  }
+
+  /* Same with the signaling for the gun aiming motor */
+  if (gunTimer && gunTimer < millis()) {
+    gunTimer = 0;
+    digitalWrite(gunUpPin, LOW);
+    digitalWrite(gunDownPin, LOW);
+  }
+
+  /* Deal with brakes the same way */
+  if (brakeTimer && brakeTimer < millis()) {
+    brakeTimer = 0;
+    setBrake(LOW);
   }
   
   /* See if we have new RF commands waiting to be received */
@@ -187,12 +238,25 @@ void loop()
           digitalWrite(shoulderLeftPin, LOW);
           digitalWrite(shoulderRightPin, HIGH);
           break;
+
+        case '^':
+          SetTimer(&gunTimer);
+          digitalWrite(gunUpPin, HIGH);
+          digitalWrite(gunDownPin, LOW);
+          break;
+        case 'v':
+          SetTimer(&gunTimer);
+          digitalWrite(gunUpPin, LOW);
+          digitalWrite(gunDownPin, HIGH);
+          break;
           
         case 'M':
           startMusic( rf12_data[1] );
           break;
         case 'm':
           startMusic( MUSIC_NONE );
+          SetTimer(&brakeTimer);
+          setBrake(HIGH);
           break;
       }
     }
