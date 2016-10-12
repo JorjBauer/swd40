@@ -252,6 +252,13 @@ int HandleShoulder()
     return 1;
   }
 
+  /* FIXME: validate that these are in the correct order */
+  if (ctrl.leftStickY() < (lcy - LEFT_CENTER_RANGE)) {
+    rf_send('v');
+  } else if (ctrl.leftStickY() > (lcy + LEFT_CENTER_RANGE)) {
+    rf_send('^');
+  }
+
   return 0;
 }
 
