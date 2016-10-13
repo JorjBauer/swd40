@@ -13,17 +13,17 @@
  *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
  *   1 Serial Out (to music board)
  *   2 
- *   3 RFM12 SPI_SS
- *   4 RFM12 SPI_MISO
- *   5 RFM12 SPI_MOSI
- *   6 RFM12 SPI_SCK
+ *   3 M1THROTTLE (PWM)
+ *   4 M1DIR
+ *   5 M2THROTTLE (PWM)
+ *   6 M2DIR
  *   7
  *   8
  *   9 RFM12 RFM_IRQ
- *  10 M1THROTTLE (PWM)
- *  11 M2THROTTLE (PWM)
- *  12 M1DIR
- *  13 M2DIR
+ *  10 RFM12 SPI_SS
+ *  11 RFM12 SPI_MOSI
+ *  12 RFM12 SPI_MISO
+ *  13 RFM12 SPI_SS
  *  14/A0 motorKeyPin  
  *  15/A1 motorBrakePin
  *  16/A2 gunUpPin
@@ -34,10 +34,10 @@
  *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
  */
 
-#define M1DIR 12
-#define M2DIR 13
-#define M1THROTTLE 10 // must be a PWM pin
-#define M2THROTTLE 11 // must be a PWM pin
+#define M1DIR 4
+#define M2DIR 6
+#define M1THROTTLE 3 // must be a PWM pin
+#define M2THROTTLE 5 // must be a PWM pin
 #define MotorKeyPin A0
 #define MotorBrakePin A1
 
@@ -48,7 +48,7 @@
 #define gunDownPin A3
 
 #define MaxThrottleVoltage 4.0
-#define MOTORMAX 204      // approximately 4v on the PWM.
+#define MOTORMAX 204
 
 // fixme; these constants belong somewhere else
 #define MUSIC_NONE 0
@@ -79,8 +79,14 @@ int right_motor = 0; // current setting, -10 to +10
 void setup()
 {
   Serial.begin(9600);
+#ifdef DEBUG
+  Serial.println("Debug enabled");
+#endif
 
   rf12_initialize(RF_NODEID, RF12_433MHZ, RF_GROUPID);
+#ifdef DEBUG
+  Serial.println("RF12 initialized");
+#endif  
   
   pinMode(shoulderLeftPin, OUTPUT);
   pinMode(shoulderRightPin, OUTPUT);
@@ -184,9 +190,17 @@ void loop()
   /* See if we have new RF commands waiting to be received */
   
   if (rf12_recvDone()) {
+
     if (rf12_crc == 0) {
       // CRC==0 means "no errors"
 
+#ifdef DEBUG
+      {
+        char boo[25];
+        sprintf(boo, "rec: [%c]\r\n", rf12_data[0]);
+        Serial.print(boo);
+      }
+#endif
       switch (rf12_data[0]) {
         /* Forward or backward mode for next command */
         case 'F':
