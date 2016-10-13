@@ -1,7 +1,29 @@
-The remote decides what it should be sending, in terms of motor
-percentage and direction.
+Protocol v1.1, 10/12/2016.
 
-This protocol is correct as of 10/12/2016.
+This protocol had a few design goals:
+
+1. Keep the code in the Dalek simple.
+2. Make the Dalek side of the protocol self-healing; a failure of a controller 
+   should bring the Dalek to rest.
+
+This means that decisions like the vector interpretation of a joystick
+position, turned in to relative forward/backward drive ratios, is the
+responsibility of the remote control; the Dalek itself simply gets
+commands that tell it to set its wheels to move forward or backward at
+a given percentage of their maximum.
+
+Commands are single characters, with the exception of the music
+playing commands (which are two characters).
+
+The motor commands are designed so that the remote only needs to send
+a simple 'G' to tell the Dalek to continue doing what it did last
+time; a continuous stream of these pulses lets it move with minimal
+required airtime. When the next 200mS of drive time need to be
+different than the current one, the remote has that 200mS to send
+commands that prepare the Dalek for the new motor speeds/directions
+before it has to send another 'G' to get it going in the new
+direction.
+
 
 F: next command(s) will be forward
 B: next command(s) will be backward
