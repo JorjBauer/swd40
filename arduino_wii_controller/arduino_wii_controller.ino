@@ -1,9 +1,56 @@
+#include <Arduino.h>
+#include <RFM69.h>          //get it here: https://www.github.com/lowpowerlab/rfm69
+#include <SPI.h>
+#include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
+#include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
+
 #include <Wire.h>
-#include <JeeLib.h>
 #include "WiiClassic.h"
 
-#define RF_NODEID 1
-#define RF_GROUPID 212
+/* Pins used.
+ *  
+ *  The Moteino communicates with its embedded RFM69 on pins 2, 10, 11, 12, 13.
+ *  Pin 9 is the onboard LED.
+ *  Ping A6 and A7 are analog input only.
+ *  
+ *   0
+ *   1
+ *   2 RFM69: INT0
+ *   3 
+ *   4
+ *   5
+ *   6
+ *   7
+ *   8
+ *   9 (onboard LED; reusable if necessary)
+ *  10 RFM69
+ *  11 RFM69
+ *  12 RFM69
+ *  13 RFM69
+ *  14/A0 
+ *  15/A1 
+ *  16/A2
+ *  17/A3
+ *  18/A4 Wire library I2C
+ *  19/A5 Wire library I2C
+ */
+
+/* Moteino constants */
+#define DALEK_NODEID 30 // Our partner in crime :)
+#define NODEID      31
+#define NETWORKID   212
+#define FREQUENCY RF69_915MHZ
+#define IS_RFM69HW  //uncomment only for RFM69HW! Leave out if you have RFM69W!
+#ifdef DEFAULTKEY
+#define ENCRYPTKEY DEFAULTKEY
+#else
+#pragma message("Default encryption key not found; using compiled-in default instead")
+#define ENCRYPTKEY "sampleEncryptKey"
+#endif
+#define FLASH_SS 8
+
+RFM69 radio;
+SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 
 #define LED_PIN 6
 
@@ -59,7 +106,12 @@ void setup() {
   rcx = ctrl.rightStickX();
   rcy = ctrl.rightStickY();
 
-  rf12_initialize(RF_NODEID, RF12_433MHZ, RF_GROUPID);
+  radio.initialize(FREQUENCY, NODEID, NETWORKID);
+  radio.encrypt(ENCRYPTKEY);
+#ifdef IS_RFM69HW
+  radio.setHighPower(); //only for RFM69HW!
+#endif
+  flash.initialize();
 
   pinMode(LED_PIN, OUTPUT);
   analogWrite(LED_PIN, 100);
@@ -320,12 +372,7 @@ void rf_send(const char *data, int datasize)
 #ifdef DEBUG
   Serial.println(data);
 #endif
-  while (!rf12_canSend()) {
-    rf12_recvDone();
-  }
-
-  rf12_sendStart(2, data, datasize);
-  rf12_sendWait(1);
+  radio.send(DALEK_NODEID, data, datasize, false); // no ACK, no retransmission.
 }
 
 void rf_send(const char data)
@@ -333,15 +380,15 @@ void rf_send(const char data)
 #ifdef DEBUG
   Serial.println(data);
 #endif
-  while (!rf12_canSend()) {
-    rf12_recvDone();
-  }
-
-  rf12_sendStart(2, &data, 1);
-  rf12_sendWait(1);
+  rf_send(&data, 1);
 }
 
 void loop() {
+  // Check for program updates over RF
+  if (radio.receiveDone()) {
+    CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
+  }
+  
   // Handle motor ramp up/down
   if (millis() >= last_motor_update_time + 40) {
     
