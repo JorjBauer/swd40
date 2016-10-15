@@ -1,13 +1,13 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
-#include <SoftwareSerial9.h> // get it here: https://github.com/addibble/SoftwareSerial9
+#include <HoverboardControl.h>
 #include <RFM69.h>          //get it here: https://www.github.com/lowpowerlab/rfm69
 #include <SPI.h>
 #include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
 #include <TimerOne.h>
 
-#undef DEBUG
+#define DEBUG
 
 /*
  * Possible motor/power initialization protocol
@@ -57,7 +57,7 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
  *   1 Serial Out (to music board)
  *   2 RFM69: INT0
- *   3 
+ *   3 Relay to hoverboard power switch
  *   4 M1 out
  *   5 M1 in
  *   6 M2 out
@@ -78,15 +78,20 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
  */
 
+// accel/decel speed
+#define ACCEL 15
+
+#define PowerRelayPin 3
 #define M1out 4
 #define M1in 5
 #define M2out 6
 #define M2in 7
 
-#define MAXMOTOR 2048 // FIXME: don't know what MAXMOTOR really is. This is based on my limited testing. I think it goes as high as 
+#define MAXMOTOR 1023 // FIXME: don't know what MAXMOTOR really is. This is based on my limited testing.
+#define HEARTBEATTIME 5000 // once every 5 seconds, check power board heartbeat
 
-SoftwareSerial9 leftMotor(M1in, M1out);
-SoftwareSerial9 rightMotor(M2in, M2out);
+HoverboardControl leftMotor(M1out, M1in);
+HoverboardControl rightMotor(M2out, M2in);
 
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
@@ -104,31 +109,71 @@ unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
 unsigned long brakeTimer = 0;
 unsigned long gunTimer = 0;
+unsigned long HeartbeatCheckTimer = 0;
 
 /* cached settings from last update of remote */
 #define kFORWARD 0
 #define kBACKWARD 1
-int fb_cache = -1;
-int p_cache = -1; // percentage motor
+int fb_cache = kFORWARD; // forward/backward setting
+int p_cache = 0; // percentage motor
 
-/* last set values for the motor speeds */
-int left_motor = 0; // current setting, -10 to +10
-int right_motor = 0; // current setting, -10 to +10
+/* last set values for the motor speed targets */
+int next_left_motor = 0; // current setting, -10 to +10
+int next_right_motor = 0; // current setting, -10 to +10
 
+int16_t current_left_target = 0;
+int16_t current_right_target = 0;
 int16_t left_out = 0;
 int16_t right_out = 0;
 
 void updateMotors(void)
 {
+  int8_t la = 0, ra = 0; // accelerations - replicating what I think is the IMU acceleration data?
+
+  // ramp up and down to our targets.
+  if (left_out != current_left_target) {
+    if (current_left_target > left_out) {
+      la = 1;
+    } else {
+      // must be less than
+      la = -1;
+    }
+    left_out += (la * ACCEL);
+    // check for overshoot b/c ACCEL. :/
+    if (la > 0 && left_out > current_left_target)
+      left_out = current_left_target;
+    if (la < 0 && left_out < current_left_target)
+      left_out = current_left_target;
+  }
+
+  if (right_out != current_right_target) {
+    if (current_right_target > right_out) {
+      ra = 1;
+    } else {
+      // must be less than
+      ra = -1;
+    }
+    right_out += (ra * ACCEL);
+    // check for overshoot b/c ACCEL. :/
+    if (ra > 0 && right_out > current_right_target)
+      right_out = current_right_target;
+    if (ra < 0 && right_out < current_right_target)
+      right_out = current_right_target;
+  }
+
+  // convert left_out and right_out in to an angle. The default near-level angle is 
+//0x31 0x00 0x31 0x00 0x55 0x2B 0x2B 0x00 0x00 0x80 
+
+
   leftMotor.write9(left_out & 0xFF);
   leftMotor.write9((left_out >> 8) & 0xFF);
   leftMotor.write9(left_out & 0xFF);
   leftMotor.write9((left_out >> 8) & 0xFF);
   leftMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  leftMotor.write9(80); // Don't know what this is, but 
-  leftMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  leftMotor.write9(0x2C); // Don't know what this is, but 
+  leftMotor.write9(0x2C); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
   leftMotor.write9(0);  // Don't know what this is either, but
-  leftMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
+  leftMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive.
   leftMotor.write9(0x100);
 
   rightMotor.write9(right_out & 0xFF);
@@ -139,8 +184,18 @@ void updateMotors(void)
   rightMotor.write9(80); // Don't know what this is, but 
   rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
   rightMotor.write9(0);  // Don't know what this is either, but
-  rightMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
+  rightMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive. Seems to make beeps.
   rightMotor.write9(0x100);
+}
+
+void PulseMainBoardPowerRelay()
+{
+  // Force motor state back to zero; we're apparently not in communication with the driver board yet
+  left_out = right_out = current_left_target = current_right_target = 0;
+  
+  digitalWrite(PowerRelayPin, HIGH);
+  delay(500);
+  digitalWrite(PowerRelayPin, LOW);
 }
 
 void setup()
@@ -168,31 +223,48 @@ void setup()
   pinMode(shoulderRightPin, OUTPUT);
   pinMode(gunUpPin, OUTPUT);
   pinMode(gunDownPin, OUTPUT);
+  pinMode(PowerRelayPin, OUTPUT);
 
   pinMode(9, OUTPUT); // LED debugging
+
+  Timer1.initialize(10000);
+  Timer1.attachInterrupt(updateMotors); // attaches the interrupt
+  Timer1.start(); // starts the timer
+
+  HeartbeatCheckTimer = millis() + HEARTBEATTIME;
 }
 
-void setMotorSpeeds(int l, int r)
+void setMotorTargets(int l, int r)
 {
-  left_out = l;
-  right_out = r;
+  current_left_target = l;
+  current_right_target = r;
 }
 
-void MakeMotorsGo(int left_motor, int right_motor)
+void MakeMotorsGo(int l, int r)
 {
+  // debugging: flash LED when we get a G pulse
+  static bool ledState = 0;
+  ledState = !ledState;
+  digitalWrite(9, ledState);
+  
   // map v from [-10..10] to a percentage from [-100..100]
-  int left_out = map(left_motor, -10, 10, -100, 100);
-  int right_out = map(right_motor, -10, 10, -100, 100);
+  int lo = map(l, -10, 10, -MAXMOTOR, MAXMOTOR);
+  int ro = map(r, -10, 10, -MAXMOTOR, MAXMOTOR);
+
+  // debugging
+  static char buf[30];
+  sprintf(buf, "%d %d => %d %d\n", l, r, lo, ro);
+  Serial.println(buf);
 
   // safety catch for low rouding errors. If we're near zero, assume it should be zero.
   // FIXME: arbitrary constants - this was 5 when MAX_SPEED was 400, so maybe this should be 2 now?
-  if (abs(left_out) < 5)
-    left_out = 0;
-  if (abs(right_out) < 5)
-    right_out = 0;
-    
-  setMotorSpeeds(left_out, right_out);
-  if (left_out != 0 || right_out != 0) {
+  if (abs(lo) < 5)
+    lo = 0;
+  if (abs(ro) < 5)
+    ro = 0;
+
+  setMotorTargets(lo, ro);
+  if (lo != 0 || ro != 0) {
     // If either motor is engaged, then we start the timer
     SetTimer(&MotorTimer);
   }
@@ -210,14 +282,19 @@ void SetTimer(unsigned long *t)
 
 void loop()
 {
-  /* Every possible loop, update the motors. */
-  updateMotors();
+  /* Periodically check for communication from the main drive board. It will shut itself down if it's left inactive... */
+  if (HeartbeatCheckTimer && HeartbeatCheckTimer < millis()) {
+    HeartbeatCheckTimer = millis() + HEARTBEATTIME;
+    if (!leftMotor.isAlive()) {
+      PulseMainBoardPowerRelay();
+    }
+}
   
   /* Spin down the motors if their timers have expired */
-//  if (MotorTimer && MotorTimer < millis()) {
-//    MotorTimer = 0;
-//    setMotorSpeeds(0, 0);
-//  }
+  if (MotorTimer && MotorTimer < millis()) {
+    MotorTimer = 0;
+    setMotorTargets(0, 0);
+  }
 
   /* Same with the signaling for the shoulder motors */  
   if (shoulderTimer && shoulderTimer < millis()) {
@@ -247,6 +324,11 @@ void loop()
 
     bool wantStartMusic = false;
     for (unsigned char i=0; i < radio.DATALEN; i++) {
+      // debugging
+      static char buf[2] = {0, 0};
+      buf[0] = radio.DATA[i];
+      Serial.println(buf);
+      
       if (wantStartMusic) {
           startMusic( radio.DATA[i] );
           wantStartMusic = false;
@@ -278,19 +360,19 @@ void loop()
           
         /* Set the left or right motor, when activated, to the current cached state */
         case 'L':
-          left_motor = p_cache;
+          next_left_motor = p_cache;
           if (fb_cache == kBACKWARD)
-            left_motor = -left_motor;
+            next_left_motor = -next_left_motor;
           break;
         case 'R':
-          right_motor = p_cache;
+          next_right_motor = p_cache;
           if (fb_cache == kBACKWARD)
-            right_motor = -right_motor;
+            next_right_motor = -next_right_motor;
           break;
           
         /* Pulse the motors at the given values */
         case 'G':
-          MakeMotorsGo(left_motor, right_motor);
+          MakeMotorsGo(next_left_motor, next_right_motor);
           break;
   
         /* Shoulder rotation commands */          
