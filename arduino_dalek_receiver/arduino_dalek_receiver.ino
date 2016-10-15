@@ -5,6 +5,7 @@
 #include <SPI.h>
 #include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
+#include <TimerOne.h>
 
 #undef DEBUG
 
@@ -114,6 +115,34 @@ int p_cache = -1; // percentage motor
 int left_motor = 0; // current setting, -10 to +10
 int right_motor = 0; // current setting, -10 to +10
 
+int16_t left_out = 0;
+int16_t right_out = 0;
+
+void updateMotors(void)
+{
+  leftMotor.write9(left_out & 0xFF);
+  leftMotor.write9((left_out >> 8) & 0xFF);
+  leftMotor.write9(left_out & 0xFF);
+  leftMotor.write9((left_out >> 8) & 0xFF);
+  leftMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
+  leftMotor.write9(80); // Don't know what this is, but 
+  leftMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  leftMotor.write9(0);  // Don't know what this is either, but
+  leftMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
+  leftMotor.write9(0x100);
+
+  rightMotor.write9(right_out & 0xFF);
+  rightMotor.write9((right_out >> 8) & 0xFF);
+  rightMotor.write9(right_out & 0xFF);
+  rightMotor.write9((right_out >> 8) & 0xFF);
+  rightMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
+  rightMotor.write9(80); // Don't know what this is, but 
+  rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  rightMotor.write9(0);  // Don't know what this is either, but
+  rightMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
+  rightMotor.write9(0x100);
+}
+
 void setup()
 {
   Serial.begin(9600); // Primarily for talking to the music board
@@ -140,103 +169,13 @@ void setup()
   pinMode(gunUpPin, OUTPUT);
   pinMode(gunDownPin, OUTPUT);
 
-//  initMotors();
-
-#if 0
-/* DEBUG START */
-  while (1) {
-    uint16_t a, b, c, d, e;
-    short program_counter = 0;
-    do {
-      a = pgm_read_byte((const uint8_t *)&program[program_counter++]);
-      b = pgm_read_byte((const uint8_t *)&program[program_counter++]);
-      c = pgm_read_byte((const uint8_t *)&program[program_counter++]);
-      d = pgm_read_byte((const uint8_t *)&program[program_counter++]);
-      e = pgm_read_byte((const uint8_t *)&program[program_counter++]);
-  
-      if (a || b || c || d || e) {
-        leftMotor.write9(a);
-        leftMotor.write9(b);
-        leftMotor.write9(a);
-        leftMotor.write9(b);
-        leftMotor.write9(c);
-        leftMotor.write9(d);
-        leftMotor.write9(d);
-        leftMotor.write9(e);
-        leftMotor.write9(e);
-        leftMotor.write9(0x100);
-      }
-    } while (a || b || c || d || e);
-  }
-/* DEBUG END */
-#endif
+  pinMode(9, OUTPUT); // LED debugging
 }
 
-void initMotors()
+void setMotorSpeeds(int l, int r)
 {
-  byte initVectors[] = { 0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0,0,170,0,0,
-0, 0, 0, 0, 0 };
-
-  Serial.println("init");
-
-  int ptr = 0;
-  while (1) {
-    byte a = initVectors[ptr++];
-    byte b = initVectors[ptr++];
-    byte c = initVectors[ptr++];
-    byte d = initVectors[ptr++];
-    byte e = initVectors[ptr++];
-    if (a || b || c || d || e) {
-        leftMotor.write9(a);
-        leftMotor.write9(b);
-        leftMotor.write9(a);
-        leftMotor.write9(b);
-        leftMotor.write9(c);
-        leftMotor.write9(d);
-        leftMotor.write9(d);
-        leftMotor.write9(e);
-        leftMotor.write9(e);
-        leftMotor.write9(0x100);
-    } else {
-      break;
-    }
-  }
-}
-
-void setMotorSpeeds(int left_out, int right_out, signed char direction)
-{
-      leftMotor.write9(left_out & 0xFF);
-      leftMotor.write9((left_out >> 8) & 0xFF);
-      leftMotor.write9(left_out & 0xFF);
-      leftMotor.write9((left_out >> 8) & 0xFF);
-      leftMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-      leftMotor.write9(80); // Don't know what this is, but 
-      leftMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-      leftMotor.write9(0);  // Don't know what this is either, but
-      leftMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
-      leftMotor.write9(0x100);
-
-#if 1
-      rightMotor.write9(right_out & 0xFF);
-      rightMotor.write9((right_out >> 8) & 0xFF);
-      rightMotor.write9(right_out & 0xFF);
-      rightMotor.write9((right_out >> 8) & 0xFF);
-      rightMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-      rightMotor.write9(80); // Don't know what this is, but 
-      rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-      rightMotor.write9(0);  // Don't know what this is either, but
-      rightMotor.write9(0);  //   ... it has to be repeated too. Might be angle? seems to vary from a small negative to a small positive.
-      rightMotor.write9(0x100);
-#endif
-
-//   delay(100);
+  left_out = l;
+  right_out = r;
 }
 
 void MakeMotorsGo(int left_motor, int right_motor)
@@ -252,7 +191,7 @@ void MakeMotorsGo(int left_motor, int right_motor)
   if (abs(right_out) < 5)
     right_out = 0;
     
-  setMotorSpeeds(right_out, left_out, 0);
+  setMotorSpeeds(left_out, right_out);
   if (left_out != 0 || right_out != 0) {
     // If either motor is engaged, then we start the timer
     SetTimer(&MotorTimer);
@@ -269,27 +208,16 @@ void SetTimer(unsigned long *t)
   *t = millis() + FLOAT_TIME;
 }
 
-// loop for debugging: try ramping up and down continually
 void loop()
 {
-  signed int speed = 0;
-  signed char direction = -1;
-  while (1) {
-    setMotorSpeeds(speed, speed, direction);
-    speed += direction;
-    if (abs(speed) == MAXMOTOR) {
-      direction = -direction;
-    }
-  }
-}
-
-void loop2()
-{
+  /* Every possible loop, update the motors. */
+  updateMotors();
+  
   /* Spin down the motors if their timers have expired */
-  if (MotorTimer && MotorTimer < millis()) {
-    MotorTimer = 0;
-    setMotorSpeeds(0, 0, 0);
-  }
+//  if (MotorTimer && MotorTimer < millis()) {
+//    MotorTimer = 0;
+//    setMotorSpeeds(0, 0);
+//  }
 
   /* Same with the signaling for the shoulder motors */  
   if (shoulderTimer && shoulderTimer < millis()) {
@@ -306,10 +234,12 @@ void loop2()
   }
 
   /* Deal with brakes the same way */
+#if 0
   if (brakeTimer && brakeTimer < millis()) {
     brakeTimer = 0;
 //    setBrake(LOW);
   }
+#endif
   
   /* See if we have new RF commands waiting to be received */
   if (radio.receiveDone()) {
