@@ -19,7 +19,7 @@
  *   3 
  *   4
  *   5
- *   6
+ *   6 LED
  *   7
  *   8
  *   9 (onboard LED; reusable if necessary)
@@ -64,7 +64,7 @@ int lcx, lcy, rcx, rcy;
 #define kFORWARD 0
 #define kBACKWARD 1
 
-// #define DEBUG
+#define DEBUG
 
 int slow_mode = 1; // Slow or fast mode? Slow by default.
 
@@ -111,7 +111,11 @@ void setup() {
 #ifdef IS_RFM69HW
   radio.setHighPower(); //only for RFM69HW!
 #endif
-  flash.initialize();
+  if (!flash.initialize()) {
+#ifdef DEBUG
+  Serial.println("Failed to init flash");
+#endif
+  }
 
   pinMode(LED_PIN, OUTPUT);
   analogWrite(LED_PIN, 100);
@@ -307,6 +311,11 @@ int HandleMovement()
 
 int HandleShoulder()
 {
+  if (ctrl.homePressed()) {
+    rf_send('*');
+    return 1;
+  }
+
   if (ctrl.leftStickX() < (lcx - LEFT_CENTER_RANGE)) {
     rf_send(')');
     return 1;
@@ -318,8 +327,10 @@ int HandleShoulder()
   /* FIXME: validate that these are in the correct order */
   if (ctrl.leftStickY() < (lcy - LEFT_CENTER_RANGE)) {
     rf_send('v');
+    return 1;
   } else if (ctrl.leftStickY() > (lcy + LEFT_CENTER_RANGE)) {
     rf_send('^');
+    return 1;
   }
 
   return 0;
