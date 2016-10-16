@@ -6,6 +6,7 @@
 #include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
 #include <TimerOne.h>
+#include <avr/wdt.h>
 
 #define DEBUG
 
@@ -79,7 +80,7 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  */
 
 // accel/decel speed
-#define ACCEL 15
+#define ACCEL 10
 
 #define PowerRelayPin 3
 #define M1out 4
@@ -88,7 +89,7 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 #define M2in 7
 
 #define MAXMOTOR 1023 // FIXME: don't know what MAXMOTOR really is. This is based on my limited testing.
-#define HEARTBEATTIME 5000 // once every 5 seconds, check power board heartbeat
+#define HEARTBEATTIME 2500 // once every 2.5 seconds, check power board heartbeat
 
 HoverboardControl leftMotor(M1out, M1in);
 HoverboardControl rightMotor(M2out, M2in);
@@ -170,8 +171,8 @@ void updateMotors(void)
   leftMotor.write9(left_out & 0xFF);
   leftMotor.write9((left_out >> 8) & 0xFF);
   leftMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  leftMotor.write9(0x2C); // Don't know what this is, but 
-  leftMotor.write9(0x2C); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  leftMotor.write9(0x2C+la); // Don't know what this is, but 
+  leftMotor.write9(0x2C+la); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
   leftMotor.write9(0);  // Don't know what this is either, but
   leftMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive.
   leftMotor.write9(0x100);
@@ -181,8 +182,8 @@ void updateMotors(void)
   rightMotor.write9(right_out & 0xFF);
   rightMotor.write9((right_out >> 8) & 0xFF);
   rightMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  rightMotor.write9(80); // Don't know what this is, but 
-  rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  rightMotor.write9(80+ra); // Don't know what this is, but 
+  rightMotor.write9(80+ra); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
   rightMotor.write9(0);  // Don't know what this is either, but
   rightMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive. Seems to make beeps.
   rightMotor.write9(0x100);
@@ -200,6 +201,8 @@ void PulseMainBoardPowerRelay()
 
 void setup()
 {
+  MCUSR = 0;  // clear out any flags of prior watchdog resets.
+  
   Serial.begin(9600); // Primarily for talking to the music board
 #ifdef DEBUG
   Serial.println("Debug enabled");
@@ -227,11 +230,13 @@ void setup()
 
   pinMode(9, OUTPUT); // LED debugging
 
-  Timer1.initialize(10000);
+  Timer1.initialize(7000);
   Timer1.attachInterrupt(updateMotors); // attaches the interrupt
   Timer1.start(); // starts the timer
 
   HeartbeatCheckTimer = millis() + HEARTBEATTIME;
+
+  wdt_enable(WDTO_1S);
 }
 
 void setMotorTargets(int l, int r)
@@ -282,6 +287,8 @@ void SetTimer(unsigned long *t)
 
 void loop()
 {
+  wdt_reset();
+  
   /* Periodically check for communication from the main drive board. It will shut itself down if it's left inactive... */
   if (HeartbeatCheckTimer && HeartbeatCheckTimer < millis()) {
     HeartbeatCheckTimer = millis() + HEARTBEATTIME;
@@ -319,8 +326,21 @@ void loop()
 #endif
   
   /* See if we have new RF commands waiting to be received */
+
+  // Make sure the timer is off for this so the radio's not interrupted */
+  Timer1.detachInterrupt();
   if (radio.receiveDone()) {
+    Timer1.attachInterrupt(updateMotors);
+    if (radio.DATALEN >= 4 && radio.DATA[0] == 'F' && radio.DATA[1] == 'L' && radio.DATA[2] == 'X' && radio.DATA[3] == '?') {
+      // probably going to flash - shut down the timer and watchdog timer
+      wdt_disable();
+    }
+
     CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
+
+#ifdef DEBUG
+    Serial.println("rf");
+#endif
 
     bool wantStartMusic = false;
     for (unsigned char i=0; i < radio.DATALEN; i++) {
@@ -336,6 +356,10 @@ void loop()
       }
   
       switch (radio.DATA[i]) {
+        case '*':
+          // Restart!
+          ForceRestart();
+          break;
         /* Forward or backward mode for next command */
         case 'F':
           fb_cache = kFORWARD;
@@ -372,7 +396,8 @@ void loop()
           
         /* Pulse the motors at the given values */
         case 'G':
-          MakeMotorsGo(next_left_motor, next_right_motor);
+          // Note that we reverse the sense of the right motor here b/c brushless, clockwise, etc.
+          MakeMotorsGo(next_left_motor, -next_right_motor);
           break;
   
         /* Shoulder rotation commands */          
@@ -404,10 +429,46 @@ void loop()
         case 'm':
           startMusic( MUSIC_NONE );
           SetTimer(&brakeTimer);
-//          setBrake(HIGH);
+          setBrake();
           break;
       }
     }
+  } else {
+    Timer1.attachInterrupt(updateMotors);
   }
+}
+
+void setBrake() {
+          Timer1.detachInterrupt(); // Destructive stop! Will need to power-cycle...
+          Timer1.stop();
+          for (int i=0; i<10; i++) {
+  leftMotor.write9(0);
+  leftMotor.write9(0);
+  leftMotor.write9(0);
+  leftMotor.write9(0);
+  leftMotor.write9(0xAA); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
+  leftMotor.write9(0x2C); // Don't know what this is, but 
+  leftMotor.write9(0x2C); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  leftMotor.write9(0);  // Don't know what this is either, but
+  leftMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive.
+  leftMotor.write9(0x100);
+
+  rightMotor.write9(0);
+  rightMotor.write9(0);
+  rightMotor.write9(0);
+  rightMotor.write9(0);
+  rightMotor.write9(0xAA); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
+  rightMotor.write9(80); // Don't know what this is, but 
+  rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
+  rightMotor.write9(0);  // Don't know what this is either, but
+  rightMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive. Seems to make beeps.
+  rightMotor.write9(0x100);
+  }
+}
+
+void ForceRestart()
+{
+  wdt_enable(WDTO_15MS);
+  while(1) ;
 }
 
