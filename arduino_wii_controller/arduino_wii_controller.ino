@@ -286,13 +286,6 @@ int HandleMovement()
 
   OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
 
-  if (slow_mode) {
-    new_leftmotor *= 2;
-    new_leftmotor /= 3;
-    new_rightmotor *= 2;
-    new_rightmotor /= 3;
-  }
-  
   if (new_leftmotor == 0 && new_rightmotor == 0) {
     target_lm_state = target_rm_state = 0;
     return 0;
@@ -441,7 +434,13 @@ void loop() {
     last_motor_counter++;
     if ((last_motor_counter & 1) == 1) {
       if (lm_state || rm_state) {
-        rf_send('G');
+        // Since there's no communication back from the Dalek about whether it's in fast or slow mode, 
+        // and we're flashing the LED differently for both, and I want that to always be true:
+        // we'll always send the slow/fast deliniator with the 'G' to pulse the motors. Not as 
+        // efficient as I'd like, but it should prove reliable.
+        static char gobuf[2] = { '-', 'G'};
+        gobuf[0] = slow_mode ? '-' : '+';
+        rf_send(gobuf, 2);
       }
     }
     

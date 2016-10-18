@@ -1,12 +1,11 @@
 #include <Arduino.h>
 #include <avr/pgmspace.h>
-#include <HoverboardControl.h>
 #include <RFM69.h>          //get it here: https://www.github.com/lowpowerlab/rfm69
 #include <SPI.h>
 #include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
-#include <TimerOne.h>
 #include <avr/wdt.h>
+#include <AH_MCP4921.h>
 
 #define DEBUG
 
@@ -58,17 +57,17 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
  *   1 Serial Out (to music board)
  *   2 RFM69: INT0
- *   3 Relay to hoverboard power switch
- *   4 M1 out
- *   5 M1 in
- *   6 M2 out
- *   7 M2 in
+ *   3 Motor controllers' power key relay
+ *   4 SPI CS to DAC for motor #1
+ *   5 
+ *   6 
+ *   7 
  *   8
  *   9 (onboard LED; reusable if necessary)
  *  10 RFM69
- *  11 RFM69
+ *  11 RFM69 (also: SPI MOSI to DAC)
  *  12 RFM69
- *  13 RFM69
+ *  13 RFM69 (also: SPI CLK to DAC)
  *  14/A0 
  *  15/A1 
  *  16/A2 gunUpPin
@@ -79,20 +78,9 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
  */
 
-// accel/decel speed
-#define ACCEL 10
-
 #define PowerRelayPin 3
-#define M1out 4
-#define M1in 5
-#define M2out 6
-#define M2in 7
-
-#define MAXMOTOR 1023 // FIXME: don't know what MAXMOTOR really is. This is based on my limited testing.
-#define HEARTBEATTIME 2500 // once every 2.5 seconds, check power board heartbeat
-
-HoverboardControl leftMotor(M1out, M1in);
-HoverboardControl rightMotor(M2out, M2in);
+#define Motor1DACCSPin 4
+AH_MCP4921 Motor1DAC(Motor1DACCSPin); // CS pin (uses SPI library)
 
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
@@ -117,87 +105,11 @@ unsigned long HeartbeatCheckTimer = 0;
 #define kBACKWARD 1
 int fb_cache = kFORWARD; // forward/backward setting
 int p_cache = 0; // percentage motor
+int slowMode = 1; // always start in slow mode
 
 /* last set values for the motor speed targets */
 int next_left_motor = 0; // current setting, -10 to +10
 int next_right_motor = 0; // current setting, -10 to +10
-
-int16_t current_left_target = 0;
-int16_t current_right_target = 0;
-int16_t left_out = 0;
-int16_t right_out = 0;
-
-void updateMotors(void)
-{
-  int8_t la = 0, ra = 0; // accelerations - replicating what I think is the IMU acceleration data?
-
-  // ramp up and down to our targets.
-  if (left_out != current_left_target) {
-    if (current_left_target > left_out) {
-      la = 1;
-    } else {
-      // must be less than
-      la = -1;
-    }
-    left_out += (la * ACCEL);
-    // check for overshoot b/c ACCEL. :/
-    if (la > 0 && left_out > current_left_target)
-      left_out = current_left_target;
-    if (la < 0 && left_out < current_left_target)
-      left_out = current_left_target;
-  }
-
-  if (right_out != current_right_target) {
-    if (current_right_target > right_out) {
-      ra = 1;
-    } else {
-      // must be less than
-      ra = -1;
-    }
-    right_out += (ra * ACCEL);
-    // check for overshoot b/c ACCEL. :/
-    if (ra > 0 && right_out > current_right_target)
-      right_out = current_right_target;
-    if (ra < 0 && right_out < current_right_target)
-      right_out = current_right_target;
-  }
-
-  // convert left_out and right_out in to an angle. The default near-level angle is 
-//0x31 0x00 0x31 0x00 0x55 0x2B 0x2B 0x00 0x00 0x80 
-
-
-  leftMotor.write9(left_out & 0xFF);
-  leftMotor.write9((left_out >> 8) & 0xFF);
-  leftMotor.write9(left_out & 0xFF);
-  leftMotor.write9((left_out >> 8) & 0xFF);
-  leftMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  leftMotor.write9(0x2C+la); // Don't know what this is, but 
-  leftMotor.write9(0x2C+la); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-  leftMotor.write9(0);  // Don't know what this is either, but
-  leftMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive.
-  leftMotor.write9(0x100);
-
-  rightMotor.write9(right_out & 0xFF);
-  rightMotor.write9((right_out >> 8) & 0xFF);
-  rightMotor.write9(right_out & 0xFF);
-  rightMotor.write9((right_out >> 8) & 0xFF);
-  rightMotor.write9(0x55); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  rightMotor.write9(80+ra); // Don't know what this is, but 
-  rightMotor.write9(80+ra); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-  rightMotor.write9(0);  // Don't know what this is either, but
-  rightMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive. Seems to make beeps.
-  rightMotor.write9(0x100);
-}
-
-void PulseMainBoardPowerRelay()
-{
-  // Force motor state back to zero; we're apparently not in communication with the driver board yet
-  left_out = right_out = current_left_target = current_right_target = 0;
-  
-  digitalWrite(PowerRelayPin, HIGH);
-  delay(500);
-  digitalWrite(PowerRelayPin, LOW);
-}
 
 void setup()
 {
@@ -218,31 +130,31 @@ void setup()
 #endif  
   flash.initialize();
 
-  // FIXME: the startup timing here is fairly important. We have to be transmitting when the main controller board comes online or it will ignore us.
-  leftMotor.begin(BUSSPEED);
-  rightMotor.begin(BUSSPEED);
-
   pinMode(shoulderLeftPin, OUTPUT);
   pinMode(shoulderRightPin, OUTPUT);
   pinMode(gunUpPin, OUTPUT);
   pinMode(gunDownPin, OUTPUT);
   pinMode(PowerRelayPin, OUTPUT);
+  pinMode(Motor1DACCSPin, OUTPUT);
 
   pinMode(9, OUTPUT); // LED debugging
 
-  Timer1.initialize(7000);
-  Timer1.attachInterrupt(updateMotors); // attaches the interrupt
-  Timer1.start(); // starts the timer
-
-  HeartbeatCheckTimer = millis() + HEARTBEATTIME;
-
   wdt_enable(WDTO_1S);
+  
+  digitalWrite(PowerRelayPin, LOW); // tell the controllers it's business time! (This is active-low)
 }
 
 void setMotorTargets(int l, int r)
 {
-  current_left_target = l;
-  current_right_target = r;
+  // We only have the left motor at the moment, and backward mode is busted!
+  // FIXME.
+  int maxValue = (slowMode ? 1000 : 2500);
+  int left_abs = map(abs(l), 0, 4096, 800, maxValue); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
+  if (l >= 0) {
+    Motor1DAC.setValue(left_abs);
+  } else {
+    Motor1DAC.setValue(0);
+  }
 }
 
 void MakeMotorsGo(int l, int r)
@@ -253,8 +165,8 @@ void MakeMotorsGo(int l, int r)
   digitalWrite(9, ledState);
   
   // map v from [-10..10] to a percentage from [-100..100]
-  int lo = map(l, -10, 10, -MAXMOTOR, MAXMOTOR);
-  int ro = map(r, -10, 10, -MAXMOTOR, MAXMOTOR);
+  int lo = map(l, -10, 10, -4096, 4096);
+  int ro = map(r, -10, 10, -4096, 4096);
 
   // debugging
   static char buf[30];
@@ -288,15 +200,7 @@ void SetTimer(unsigned long *t)
 void loop()
 {
   wdt_reset();
-  
-  /* Periodically check for communication from the main drive board. It will shut itself down if it's left inactive... */
-  if (HeartbeatCheckTimer && HeartbeatCheckTimer < millis()) {
-    HeartbeatCheckTimer = millis() + HEARTBEATTIME;
-    if (!leftMotor.isAlive()) {
-      PulseMainBoardPowerRelay();
-    }
-}
-  
+    
   /* Spin down the motors if their timers have expired */
   if (MotorTimer && MotorTimer < millis()) {
     MotorTimer = 0;
@@ -327,10 +231,7 @@ void loop()
   
   /* See if we have new RF commands waiting to be received */
 
-  // Make sure the timer is off for this so the radio's not interrupted */
-  Timer1.detachInterrupt();
   if (radio.receiveDone()) {
-    Timer1.attachInterrupt(updateMotors);
     if (radio.DATALEN >= 4 && radio.DATA[0] == 'F' && radio.DATA[1] == 'L' && radio.DATA[2] == 'X' && radio.DATA[3] == '?') {
       // probably going to flash - shut down the timer and watchdog timer
       wdt_disable();
@@ -399,6 +300,14 @@ void loop()
           // Note that we reverse the sense of the right motor here b/c brushless, clockwise, etc.
           MakeMotorsGo(next_left_motor, -next_right_motor);
           break;
+
+        /* Slow/fast mode */
+        case '+':
+          slowMode = 0;
+          break;
+        case '-':
+          slowMode = 1;
+          break;
   
         /* Shoulder rotation commands */          
         case '(':
@@ -433,37 +342,11 @@ void loop()
           break;
       }
     }
-  } else {
-    Timer1.attachInterrupt(updateMotors);
   }
 }
 
 void setBrake() {
-          Timer1.detachInterrupt(); // Destructive stop! Will need to power-cycle...
-          Timer1.stop();
-          for (int i=0; i<10; i++) {
-  leftMotor.write9(0);
-  leftMotor.write9(0);
-  leftMotor.write9(0);
-  leftMotor.write9(0);
-  leftMotor.write9(0xAA); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  leftMotor.write9(0x2C); // Don't know what this is, but 
-  leftMotor.write9(0x2C); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-  leftMotor.write9(0);  // Don't know what this is either, but
-  leftMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive.
-  leftMotor.write9(0x100);
-
-  rightMotor.write9(0);
-  rightMotor.write9(0);
-  rightMotor.write9(0);
-  rightMotor.write9(0);
-  rightMotor.write9(0xAA); // magic number. ... 0xAA is the other one it uses, but that doesn't do diddley.
-  rightMotor.write9(80); // Don't know what this is, but 
-  rightMotor.write9(80); //   ... it has to be repeated. Values vary from ~70 to ~100 in "normal" operation, from what I see.
-  rightMotor.write9(0);  // Don't know what this is either, but
-  rightMotor.write9(0);  //   ... it has to be repeated too. Might be accel? seems to vary from a small negative to a small positive. Seems to make beeps.
-  rightMotor.write9(0x100);
-  }
+  ForceRestart(); // FIXME: not what I intended, but good enough for now
 }
 
 void ForceRestart()

@@ -7,7 +7,8 @@ DualMC33926MotorShield md;
 
 #define FLOAT_TIME 10
 
-#define TURN_SPEED 180
+// M1 is connected to both motors for the shoulder
+#define SHOULDER_TURN_SPEED 180
 
 unsigned long ShoulderTimer = 0;
 
@@ -34,20 +35,17 @@ void loop()
   if (ShoulderTimer && ShoulderTimer < millis()) {
     ShoulderTimer = 0;
     md.setM1Speed(0);
-    md.setM2Speed(0);
   }
   
   if (digitalRead(shoulderLeftPin) == HIGH) {
     SetTimer(&ShoulderTimer);
-    md.setM1Speed(-TURN_SPEED);
-    md.setM2Speed(-TURN_SPEED);
+    md.setM1Speed(-SHOULDER_TURN_SPEED);
     didSomething = 1;
     Serial.println("L");
   }
   else if (digitalRead(shoulderRightPin) == HIGH) {
     SetTimer(&ShoulderTimer);
-    md.setM1Speed(TURN_SPEED);
-    md.setM2Speed(TURN_SPEED);
+    md.setM1Speed(SHOULDER_TURN_SPEED);
     didSomething = 1;
     Serial.println("R");
   }

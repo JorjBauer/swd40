@@ -1,4 +1,4 @@
-Protocol v1.1, 10/12/2016.
+Protocol v1.2, 10/17/2016.
 
 This protocol had a few design goals:
 
@@ -6,11 +6,22 @@ This protocol had a few design goals:
 2. Make the Dalek side of the protocol self-healing; a failure of a controller 
    should bring the Dalek to rest.
 
+[The primary reason for #1 was because I didn't want to have to open
+up the Dalek and reprogram it. Now that the main board is a Moteino,
+this is slightly less of an issue; I can reprogram the main board
+wirelessly. The other two controller boards are less accessible
+though.]
+
 This means that decisions like the vector interpretation of a joystick
 position, turned in to relative forward/backward drive ratios, is the
 responsibility of the remote control; the Dalek itself simply gets
 commands that tell it to set its wheels to move forward or backward at
-a given percentage of their maximum.
+a given percentage of their maximum. This worked well until converting
+to brushless DC motors, where the range is more substantial than the
+old brushed motors: now limiting to 2/3 of the range is still too
+fast, and limiting to 1/3 of the range offers only 3 stops (b/c the
+protocol only differentiates by tens of percent). So "slow" and "fast"
+now have to be abstracted in to the protocol (as of protocol 1.2).
 
 Commands are single characters, with the exception of the music
 playing commands (which are two characters).
@@ -36,13 +47,17 @@ G: Go, 1 pulse, based on current settings of both L and R motors
    stream of 'G' pulses comes in faster than one every 200mS, the motors will 
    run continuously.
 
++: set fast mode
+-: set slow mode
+
 (: rotate head left 1 pulse
 ): rotate head right 1 pulse
 ^: move gun up one pulse
 v: move gun down one pulse
 
 m: hard-stop motors (Brake) and stop all sound that might be playing
-   (Brake will stay on for 200mS, just like 'G' pulses.)
+   (Brake will stay on for 200mS, just like 'G' pulses - if we figure
+   out the brakes.)
 
 M#: play a sound with the given # (0-9)
     0: x button
