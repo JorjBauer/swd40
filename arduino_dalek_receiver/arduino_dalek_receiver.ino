@@ -9,25 +9,6 @@
 
 #undef DEBUG
 
-/*
- * Possible motor/power initialization protocol
- * send 0 0 0 0 170 0 0 0 0 256 at least once
- *   expect the return line to be high
- *   if it's not high, then we press the power button; wait some time (~40-50mS?); try again
- *   
- * In normal operation, it looks like the return line goes low for ~0.19mS regularly, 
- *   occasionally (37.875 uS off; 19 uS on;0.1136875mS on). So, in theory, if the line 
- *   isn't high - we can wait 0.19mS and poll again; if it's still not high, we have to 
- *   momentarily "press" the power button.
- * (I think the fluctuations could be the controller falling just under the logic level 
- *   limit while in mid-swing? Not sure the data is meaningful.)
- * So we could say that, at any time, we could check to see if the motors are responding;
- *   and if not, then we power up the control board.
- * Should think about how this interacts with the Dalek sitting idle for a long time; 
- *   board shuts down; then Arduino gets a command to move, and has to figure out that 
- *   the main board needs to be turned on.
- */
-
 /* Moteino constants */
 #define NODEID      30
 #define NETWORKID   212
@@ -43,10 +24,6 @@
 
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
-
-// Speed of the controller's bus (in baud). Note that the Cortex M3 on the controller has CAN bus support, and the 
-// CAN bus supports 26315.79 baud as a "normal" speed (but still unusual to see it).
-#define BUSSPEED 53156
 
 /* Pins used.
  *  
