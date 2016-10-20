@@ -7,7 +7,7 @@
 #include <avr/wdt.h>
 #include <AH_MCP4921.h>
 
-#define DEBUG
+#undef DEBUG
 
 /*
  * Possible motor/power initialization protocol
@@ -80,7 +80,12 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 
 #define PowerRelayPin 3
 #define Motor1DACCSPin 4
+#define Motor1DirectionPin 5 // low for "reverse"
+#define Motor2DACCSPin 6
+#define Motor2DirectionPin 7 // low for "reverse"
+
 AH_MCP4921 Motor1DAC(Motor1DACCSPin); // CS pin (uses SPI library)
+AH_MCP4921 Motor2DAC(Motor2DACCSPin); // CS pin (uses SPI library)
 
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
@@ -114,6 +119,9 @@ int next_right_motor = 0; // current setting, -10 to +10
 void setup()
 {
   MCUSR = 0;  // clear out any flags of prior watchdog resets.
+
+  pinMode(Motor1DirectionPin, OUTPUT);
+  digitalWrite(Motor1DirectionPin, HIGH); // pull-up enabled
   
   Serial.begin(9600); // Primarily for talking to the music board
 #ifdef DEBUG
@@ -136,6 +144,7 @@ void setup()
   pinMode(gunDownPin, OUTPUT);
   pinMode(PowerRelayPin, OUTPUT);
   pinMode(Motor1DACCSPin, OUTPUT);
+  pinMode(Motor2DACCSPin, OUTPUT);
 
   pinMode(9, OUTPUT); // LED debugging
 
@@ -144,17 +153,44 @@ void setup()
   digitalWrite(PowerRelayPin, LOW); // tell the controllers it's business time! (This is active-low)
 }
 
+// Input l/r: [-10 .. +10]
 void setMotorTargets(int l, int r)
 {
-  // We only have the left motor at the moment, and backward mode is busted!
-  // FIXME.
-  int maxValue = (slowMode ? 1000 : 2500);
-  int left_abs = map(abs(l), 0, 4096, 800, maxValue); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
+  // The two motor controllers don't perform identically; we'll need to map them individually.
+long minValueLeft = 800;
+  long minValueRight = 800;
+  long maxValueLeft = (slowMode ? 1500 : 2500);
+  long maxValueRight = (slowMode ? 1500 : 2500);
+  int left_abs = map(abs(l), 0, 10, minValueLeft, maxValueLeft); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
+  int right_abs = map(abs(r), 0, 10, minValueRight, maxValueRight);
+
+#ifdef DEBUG
+  static char buf[30];
+  sprintf(buf, "%d %d => %c%d %c%d\n", l, r, l < 0 ? '-' : '+', left_abs, r <0 ? '-' : '+', right_abs);
+  Serial.println(buf);
+#endif
+
+
+
   if (l >= 0) {
-    Motor1DAC.setValue(left_abs);
+    digitalWrite(Motor1DirectionPin, HIGH); // forward!
   } else {
-    Motor1DAC.setValue(0);
+    digitalWrite(Motor1DirectionPin, LOW); // backward!
   }
+  if (r >= 0) {
+    digitalWrite(Motor2DirectionPin, HIGH);
+  } else {
+    digitalWrite(Motor2DirectionPin, LOW);
+  }
+  if (left_abs <= minValueLeft) {
+    left_abs = 0; // don't set to < 1v; set to 0v instead.
+  }
+  if (right_abs <= minValueRight) {
+    right_abs = 0;
+  }
+  
+  Motor1DAC.setValue(left_abs);
+  Motor2DAC.setValue(right_abs);
 }
 
 void MakeMotorsGo(int l, int r)
@@ -164,24 +200,8 @@ void MakeMotorsGo(int l, int r)
   ledState = !ledState;
   digitalWrite(9, ledState);
   
-  // map v from [-10..10] to a percentage from [-100..100]
-  int lo = map(l, -10, 10, -4096, 4096);
-  int ro = map(r, -10, 10, -4096, 4096);
-
-  // debugging
-  static char buf[30];
-  sprintf(buf, "%d %d => %d %d\n", l, r, lo, ro);
-  Serial.println(buf);
-
-  // safety catch for low rouding errors. If we're near zero, assume it should be zero.
-  // FIXME: arbitrary constants - this was 5 when MAX_SPEED was 400, so maybe this should be 2 now?
-  if (abs(lo) < 5)
-    lo = 0;
-  if (abs(ro) < 5)
-    ro = 0;
-
-  setMotorTargets(lo, ro);
-  if (lo != 0 || ro != 0) {
+  setMotorTargets(l, r);
+  if (l != 0 || r != 0) {
     // If either motor is engaged, then we start the timer
     SetTimer(&MotorTimer);
   }
@@ -239,16 +259,14 @@ void loop()
 
     CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
 
-#ifdef DEBUG
-    Serial.println("rf");
-#endif
-
     bool wantStartMusic = false;
     for (unsigned char i=0; i < radio.DATALEN; i++) {
+#ifdef DEBUG
       // debugging
       static char buf[2] = {0, 0};
       buf[0] = radio.DATA[i];
       Serial.println(buf);
+#endif
       
       if (wantStartMusic) {
           startMusic( radio.DATA[i] );
