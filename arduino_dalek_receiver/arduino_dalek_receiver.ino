@@ -114,11 +114,17 @@ bool decelLeft = false;
 bool decelRight = false;
 
 #define MINLEFTMOTOR  1000
-#define MAXLEFTMOTOR  1050
-#define MINRIGHTMOTOR 1050
-#define MAXRIGHTMOTOR 1100
+#define MAXLEFTMOTOR  1150
+#define MAXFASTLEFTMOTOR 1300
+#define MINRIGHTMOTOR 1000
+#define MAXRIGHTMOTOR 1150
+#define MAXFASTRIGHTMOTOR 1300
+
+// FIXME: make left/right
+#define MAXTURNSPEED 1050
 
 #define ACCEL 10
+#define STOPPEDACCEL 40 // necessary to give the controllers time between fwd and rev
 #define DECEL 200
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
 
@@ -135,15 +141,21 @@ void timerOneInterrupt()
   }
   
   // Perform acceleration and deceleration periodically (when the timer fires)
+  int16_t maxLeftSpeed = slowMode ? MAXLEFTMOTOR : MAXFASTLEFTMOTOR;
+  int16_t maxRightSpeed = slowMode ? MAXRIGHTMOTOR : MAXFASTRIGHTMOTOR;
+  if (sign(current_left_target) != sign(current_right_target)) {
+    // TURNING.
+    maxLeftSpeed = maxRightSpeed = MAXTURNSPEED;
+  }
 
-  current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR, &decelLeft);
-  current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR, &decelRight);
+  current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, maxLeftSpeed, &decelLeft);
+  current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, maxRightSpeed, &decelRight);
 }
 
 int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal, bool *isDecelOut)
 {
   // Constrain before we start
-  if (abs(target) < minVal) {
+  if (abs(target) <= minVal) {
     target = 0;
   }
 
@@ -157,11 +169,17 @@ int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_
   // If we're accelerating, then do so SLOWLY.
   if (target >= 0 && motor >= 0 && target > motor) {
     // accelerating forward
-    motor = min(motor + ACCEL, target);
+    if (motor <= minVal)
+      motor = min(motor + STOPPEDACCEL, target);
+    else
+      motor = min(motor + ACCEL, target);
     *isDecelOut = false;
   } else if (target < 0 && motor <= 0 && target < motor) {
     // accelerating backward
-    motor = max(motor - ACCEL, target);
+    if (motor >= -minVal)
+      motor = min(motor - STOPPEDACCEL, target);
+    else
+      motor = min(motor - ACCEL, target);
     *isDecelOut = false;
   } else if (target < motor) {
     // slowing down from "too fast forward"
@@ -336,19 +354,19 @@ void updateMotors()
 // Input l/r: [-10 .. +10]
 void setMotorTargets(int l, int r)
 {
-  current_left_target = map(abs(l), 0, 10, MINLEFTMOTOR, MAXLEFTMOTOR);
-  if (current_left_target == MINLEFTMOTOR)
+  current_left_target = map(abs(l), 0, 10, MINLEFTMOTOR, slowMode ? MAXLEFTMOTOR : MAXFASTLEFTMOTOR);
+  if (current_left_target <= MINLEFTMOTOR)
     current_left_target = 0;
-  current_left_target = constrain(current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
+  current_left_target = constrain(current_left_target, MINLEFTMOTOR, slowMode ? MAXLEFTMOTOR : MAXFASTLEFTMOTOR);
 
   if (l < 0) {
     current_left_target = -current_left_target;
   }
 
-  current_right_target = map(abs(r), 0, 10, MINRIGHTMOTOR, MAXRIGHTMOTOR);
-  if (current_right_target == MINRIGHTMOTOR)
+  current_right_target = map(abs(r), 0, 10, MINRIGHTMOTOR, slowMode ? MAXRIGHTMOTOR : MAXFASTRIGHTMOTOR);
+  if (current_right_target <= MINRIGHTMOTOR)
     current_right_target = 0;
-  current_right_target = constrain(current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  current_right_target = constrain(current_right_target, MINRIGHTMOTOR, slowMode ? MAXRIGHTMOTOR : MAXFASTRIGHTMOTOR);
 
   if (r < 0) {
     current_right_target = -current_right_target;
