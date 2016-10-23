@@ -110,13 +110,15 @@ int16_t current_left_target = 0;  // -MAXLEFTMOTOR .. MAXLEFTMOTOR (where we *wa
 int16_t current_left_motor = 0;   // -MAXLEFTMOTOR .. MAXLEFTMOTOR (what the motor is doing)
 int16_t current_right_target = 0;
 int16_t current_right_motor = 0;
+bool decelLeft = false;
+bool decelRight = false;
 
 #define MINLEFTMOTOR  1000
 #define MAXLEFTMOTOR  1050
 #define MINRIGHTMOTOR 1050
 #define MAXRIGHTMOTOR 1100
 
-#define ACCEL 5
+#define ACCEL 10
 #define DECEL 200
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
 
@@ -134,11 +136,11 @@ void timerOneInterrupt()
   
   // Perform acceleration and deceleration periodically (when the timer fires)
 
-  current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
-  current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR, &decelLeft);
+  current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR, &decelRight);
 }
 
-int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal)
+int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal, bool *isDecelOut)
 {
   // Constrain before we start
   if (abs(target) < minVal) {
@@ -146,26 +148,33 @@ int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_
   }
 
   // If we reached the minimum value, then we're stopped.
-  if (target == motor && abs(target) == minVal)
-    motor = 0;
+  if (target == motor && abs(target) == minVal) {
+    *isDecelOut = false;
+    //motor = 0;
+    return 0;
+  }
   
   // If we're accelerating, then do so SLOWLY.
   if (target >= 0 && motor >= 0 && target > motor) {
     // accelerating forward
     motor = min(motor + ACCEL, target);
+    *isDecelOut = false;
   } else if (target < 0 && motor <= 0 && target < motor) {
     // accelerating backward
     motor = max(motor - ACCEL, target);
+    *isDecelOut = false;
   } else if (target < motor) {
     // slowing down from "too fast forward"
     motor = max(motor-DECEL, target);
     if (abs(motor) <= MINBRAKEVAL)
       motor = 0;
+    *isDecelOut = true;
   } else if (target > motor) {
     // slowing down from "too fast backward"
     motor = min(motor + DECEL, target);
     if (abs(motor) <= MINBRAKEVAL)
       motor = 0;
+    *isDecelOut = true;
   }
 
   // Constrain...
@@ -297,6 +306,9 @@ void updateMotors()
     return; // refuse to perfrom the update; shut down both motors instead.
   }
 
+  setBrake(true, decelLeft);
+  setBrake(false, decelRight);
+  
   if (current_left_motor != lastLeftMotor) {
     lastLeftMotor = current_left_motor;
     if (sign(lastLeftMotor) == kFORWARD) {
@@ -515,20 +527,37 @@ void loop()
   }
 }
 
+// These are individual brake lines for L/R.
+void setBrake(bool leftBrake, bool isOn)
+{
+  if (leftBrake) {
+    if (isOn) {
+      pinMode(Motor1BrakePin, OUTPUT);
+      digitalWrite(Motor1BrakePin, LOW);
+    } else {
+      pinMode(Motor1BrakePin, INPUT);
+      digitalWrite(Motor1BrakePin, HIGH);
+    }
+  } else {
+    if (isOn) {
+      pinMode(Motor2BrakePin, OUTPUT);
+      digitalWrite(Motor2BrakePin, LOW);
+    } else {
+      pinMode(Motor2BrakePin, INPUT);
+      digitalWrite(Motor2BrakePin, HIGH);
+    }
+  }
+}
+
+// This is the emergency "all stop" brake.
 void setBrake(bool isOn) {
   brakeIsOn = isOn;
   if (brakeIsOn) {
-    pinMode(Motor1BrakePin, OUTPUT);
-    digitalWrite(Motor1BrakePin, LOW);
-
-    pinMode(Motor2BrakePin, OUTPUT);
-    digitalWrite(Motor2BrakePin, LOW);
-} else {
-    pinMode(Motor1BrakePin, INPUT);
-    digitalWrite(Motor1BrakePin, HIGH);
-    
-    pinMode(Motor2BrakePin, INPUT);
-    digitalWrite(Motor2BrakePin, HIGH);
+    setBrake(true, true);
+    setBrake(false, true);
+  } else {
+    setBrake(true, false);
+    setBrake(false, false);
   }
 }
 
