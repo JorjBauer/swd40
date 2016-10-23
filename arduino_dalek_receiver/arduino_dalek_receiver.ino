@@ -118,6 +118,7 @@ int16_t current_right_motor = 0;
 
 #define ACCEL 10
 #define DECEL 200
+#define STOPRANGE 250
 
 void timerOneInterrupt()
 {
@@ -140,10 +141,6 @@ void timerOneInterrupt()
 int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal)
 {
   // Constrain before we start
-  if (abs(motor) < minVal) {
-    // don't set to ~1v; set to 0v
-    motor = 0;
-  }
   if (abs(target) < minVal) {
     target = 0;
   }
@@ -152,25 +149,23 @@ int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_
   if (target >= 0 && motor >= 0 && target > motor) {
     // accelerating forward
     motor = min(motor + ACCEL, target);
-    motor = max(minVal, motor); // don't set to any values between 0..minVal
   } else if (target < 0 && motor <= 0 && target < motor) {
     // accelerating backward
     motor = max(motor - ACCEL, target);
-    motor = min(-minVal, motor); // don't set to any values between -minVal..0
   } else if (target < motor) {
     // slowing down from "too fast forward"
     motor = max(motor-DECEL, target);
+    // If we get near zero, then set it to zero
+    if (abs(motor) < STOPRANGE)
+      motor = 0;
   } else if (target > motor) {
     // slowing down from "too fast backward"
     motor = min(motor + DECEL, target);
+    if (abs(motor) < STOPRANGE)
+      motor = 0;
   }
 
   // Constrain...
-  if (abs(motor) < minVal) {
-    // don't set to ~1v; set to 0v
-    motor = 0;
-  }
-
   if (abs(motor) > maxVal) {
     if (motor > 0)
       motor = maxVal;
@@ -293,6 +288,7 @@ void updateMotors()
     Serial.print(lastLeftMotor);
     Serial.println(" ACCEL ERR");
 #endif
+    current_left_target = current_right_target = 0;
     MotorDAC.setValue(0, LEFTDAC);
     MotorDAC.setValue(0, RIGHTDAC);
     return; // refuse to perfrom the update; shut down both motors instead.
@@ -301,22 +297,13 @@ void updateMotors()
   if (current_left_motor != lastLeftMotor) {
     lastLeftMotor = current_left_motor;
     if (sign(lastLeftMotor) == kFORWARD) {
-#ifdef DEBUG
-      Serial.print("FWD ");
-#endif
       pinMode(Motor1DirectionPin, INPUT);
       digitalWrite(Motor1DirectionPin, HIGH);
     } else {
-#ifdef DEBUG
-      Serial.print("REV ");
-#endif
       pinMode(Motor1DirectionPin, OUTPUT);
       digitalWrite(Motor1DirectionPin, LOW); // drag to ground
     }
     MotorDAC.setValue(abs(lastLeftMotor), LEFTDAC);
-#ifdef DEBUG
-    Serial.println(lastLeftMotor);
-#endif
   }
   if (current_right_motor != lastRightMotor) {
     lastRightMotor = current_right_motor;
@@ -336,21 +323,15 @@ void setMotorTargets(int l, int r)
 {
   current_left_target = map(abs(l), 0, 10, MINLEFTMOTOR, MAXLEFTMOTOR);
   current_left_target = constrain(current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
-  if (current_left_target <= MINLEFTMOTOR) {
-    // don't set to ~1v; set to 0v
-    current_left_target = 0;
-  }
+
   if (l < 0) {
     current_left_target = -current_left_target;
   }
 
-  current_right_target = map(abs(l), 0, 10, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  current_right_target = map(abs(r), 0, 10, MINRIGHTMOTOR, MAXRIGHTMOTOR);
   current_right_target = constrain(current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
-  if (current_right_target <= MINRIGHTMOTOR) {
-    // don't set to ~1v; set to 0v
-    current_right_target = 0;
-  }
-  if (l < 0) {
+
+  if (r < 0) {
     current_right_target = -current_right_target;
   }
 }
