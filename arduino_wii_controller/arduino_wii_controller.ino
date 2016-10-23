@@ -341,13 +341,19 @@ int HandleSounds()
     target_lm_state = target_rm_state = 0;
     lm_state = rm_state = 1;
     ret = 1;
-  } else if (ctrl.leftShoulderPressed()) {
+  } else if (ctrl.leftShoulderPressed() || ctrl.leftShouldPressure()) {
     // firing noise
-    rf_send("M4", 2);
+    rf_send("m", 1);
+    target_lm_state = target_rm_state = 0;
+    lm_state = rm_state = 1;
+//    rf_send("M4", 2);
     ret = 1;
-  } else if (ctrl.rightShoulderPressed()) {
+  } else if (ctrl.rightShoulderPressed() || ctrl.rightShouldPressure()) {
     // "Exterminate!"
-    rf_send("M5", 2);
+    rf_send("m", 1);
+    target_lm_state = target_rm_state = 0;
+    lm_state = rm_state = 1;
+//    rf_send("M5", 2);
     ret = 1;
   } else if (ctrl.leftDPressed()) {
     rf_send("M6", 2);

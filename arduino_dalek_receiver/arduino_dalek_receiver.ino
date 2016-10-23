@@ -193,9 +193,9 @@ void setup()
   pinMode(Motor2DirectionPin, INPUT);
   digitalWrite(Motor2DirectionPin, HIGH);
 
-  pinMode(Motor1BrakePin, OUTPUT);
+  pinMode(Motor1BrakePin, INPUT);
   digitalWrite(Motor1BrakePin, HIGH);
-  pinMode(Motor2BrakePin, OUTPUT);
+  pinMode(Motor2BrakePin, INPUT);
   digitalWrite(Motor2BrakePin, HIGH);
   
   Serial.begin(9600); // Primarily for talking to the music board
@@ -517,8 +517,19 @@ void loop()
 
 void setBrake(bool isOn) {
   brakeIsOn = isOn;
-  digitalWrite(Motor1BrakePin, brakeIsOn ? LOW : HIGH);
-  digitalWrite(Motor2BrakePin, brakeIsOn ? LOW : HIGH);
+  if (brakeIsOn) {
+    pinMode(Motor1BrakePin, OUTPUT);
+    digitalWrite(Motor1BrakePin, LOW);
+
+    pinMode(Motor2BrakePin, OUTPUT);
+    digitalWrite(Motor2BrakePin, LOW);
+} else {
+    pinMode(Motor1BrakePin, INPUT);
+    digitalWrite(Motor1BrakePin, HIGH);
+    
+    pinMode(Motor2BrakePin, INPUT);
+    digitalWrite(Motor2BrakePin, HIGH);
+  }
 }
 
 void ForceRestart()
