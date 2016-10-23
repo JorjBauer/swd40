@@ -8,7 +8,7 @@
 #include <AH_MCP4921.h>
 #include <TimerOne.h>      // used for current speed approximation
 
-#undef DEBUG
+#define DEBUG
 
 /* Moteino constants */
 #define NODEID      30
@@ -84,7 +84,7 @@ AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
 // SLEW_RATE is how fast the motor slows down on its own. We need this b/c the controllers I'm using 
 // won't go in to reverse if the motor is still spinning forward (or vice versa, maybe?)
 // This is in "units of DAC input per TimerOne interrupt" (an odd metric, to be sure)
-#define SLEW_RATE 250
+#define SLEW_RATE 10
 
 unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
@@ -105,37 +105,53 @@ int16_t approximate_left_speed = 0;  // our estimate of how fast the motor is go
 int16_t approximate_right_speed = 0; //  ... assumes infinite acceleration and SLEW_RATE decel
 int16_t current_left_target = 0;     // How fast we want the motor to be moving
 int16_t current_right_target = 0;
-bool leftMotorChangingDirection = false;
-bool rightMotorChangingDirection = false;
+int16_t lastSetLeftSpeed = 0;
+int16_t lastSetRightSpeed = 0;
+
+int16_t minValueLeft = 1000;
+int16_t minValueRight = 1000;
 
 void timerOneInterrupt()
 {
   // Update our approximated motor speeds.
 
+  if (abs(current_left_target) <= minValueLeft) {
+    current_left_target = 0;
+  }
+  if (abs(current_right_target) <= minValueRight) {
+    current_right_target = 0;
+  }
+
   if (approximate_left_speed >= 0 && current_left_target > 0) {
-    // accelerating forward: assume infinite acceleration
-    approximate_left_speed = current_left_target;
+    // accelerating forward: assume SLEW_RATE acceleration
+    approximate_left_speed = min(current_left_target, approximate_left_speed + SLEW_RATE);
   } else if (approximate_left_speed < 0 && current_left_target < 0) {
-    // accelerating backward: assume infinite acceleration
-    approximate_left_speed = current_left_target;
+    // accelerating backward: assume SLEW_RATE acceleration
+    approximate_left_speed = max(current_left_target, approximate_left_speed - SLEW_RATE);
   } else if (approximate_left_speed != current_left_target) {
     // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
     int16_t maxDelta = min(SLEW_RATE, abs(approximate_left_speed - current_left_target));
     if (approximate_left_speed > current_left_target) maxDelta = -maxDelta; // get the direction right
     approximate_left_speed += maxDelta;
+    if (abs(approximate_left_speed) <= minValueLeft) {
+      approximate_left_speed = 0;
+    }
   }
 
   if (approximate_right_speed >= 0 && current_right_target > 0) {
-    // accelerating forward: assume infinite acceleration
-    approximate_right_speed = current_right_target;
+    // accelerating forward: assume SLEW_RATE acceleration
+    approximate_right_speed = min(current_right_target, approximate_right_speed + SLEW_RATE);
   } else if (approximate_right_speed < 0 && current_right_target < 0) {
-    // accelerating backward: assume infinite acceleration
-    approximate_right_speed = current_right_target;
+    // accelerating backward: assume SLEW_RATE acceleration
+    approximate_right_speed = max(current_right_target, approximate_right_speed - SLEW_RATE);
   } else if (approximate_right_speed != current_right_target) {
     // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
     int16_t maxDelta = min(SLEW_RATE, abs(approximate_right_speed - current_right_target));
     if (approximate_right_speed > current_right_target) maxDelta = -maxDelta; // get the direction right
     approximate_right_speed += maxDelta;
+    if (abs(approximate_right_speed) <= minValueRight) {
+      approximate_right_speed = 0;
+    }
   }
 }
 
@@ -206,8 +222,6 @@ void setup()
 void setMotorTargets(int l, int r)
 {
   // The two motor controllers don't perform identically; we'll need to map them individually.
-long minValueLeft = 1000;
-  long minValueRight = 1000;
   long maxValueLeft = (slowMode ? 1300 : 1400);
   long maxValueRight = (slowMode ? 1300 : 1400);
   int left_abs = map(abs(l), 0, 10, minValueLeft, maxValueLeft); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
@@ -221,43 +235,8 @@ long minValueLeft = 1000;
   Serial.println(buf);
 #endif
 
-  if (left_abs <= minValueLeft) {
-    left_abs = 0; // don't set to < 1v; set to 0v instead.
-  }
-  if (right_abs <= minValueRight) {
-    right_abs = 0;
-  }
-
-  current_left_target = abs(left_abs) * left_dir;
-  current_right_target = abs(right_abs) * right_dir;
-
-  if (current_left_target * approximate_left_speed < 0) {
-    // one of them is backward, one is forward; we can't do that. Wait until the motor slows down.
-    // FIXME: could apply brake?
-    leftMotorChangingDirection = true;
-  } else {
-    // Apply the change.
-    leftMotorChangingDirection = false;
-    digitalWrite(Motor1DirectionPin, (left_dir == kFORWARD) ? HIGH : LOW);
-    MotorDAC.setValue(left_abs, LEFTDAC);
-  }
-
-#ifdef DEBUG
-Serial.print("crt: ");
-Serial.print(current_right_target);
-Serial.print(" ars: ");
-Serial.println(approximate_right_speed);
-#endif
-  if (current_right_target * approximate_right_speed < 0) {
-    // one of them is backward, one is forward; we can't do that. Wait until the motor slows down.
-    // FIXME: could apply brake?
-    rightMotorChangingDirection = true;
-  } else {
-    // Apply the change.
-    rightMotorChangingDirection = false;
-    digitalWrite(Motor2DirectionPin, (right_dir == kFORWARD) ? HIGH : LOW);
-    MotorDAC.setValue(right_abs, RIGHTDAC);
-  }
+  current_left_target = left_abs * left_dir;
+  current_right_target = right_abs * right_dir;
 }
 
 void MakeMotorsGo(int l, int r)
@@ -287,6 +266,27 @@ void SetTimer(unsigned long *t)
 void loop()
 {
   wdt_reset();
+
+  // set the motor DACs based on the current speed, if it changed since last time
+  if (approximate_left_speed != lastSetLeftSpeed) {
+    lastSetLeftSpeed = approximate_left_speed;
+    digitalWrite(Motor1DirectionPin, lastSetLeftSpeed >= 0 ? HIGH : LOW);
+    MotorDAC.setValue(abs(lastSetLeftSpeed), LEFTDAC);
+#ifdef DEBUG
+    Serial.print("L: ");
+    Serial.println(lastSetLeftSpeed);
+#endif
+  }
+
+  if (approximate_right_speed != lastSetRightSpeed) {
+    lastSetRightSpeed = approximate_right_speed;
+    digitalWrite(Motor2DirectionPin, lastSetRightSpeed >= 0 ? HIGH : LOW);
+    MotorDAC.setValue(abs(lastSetRightSpeed), RIGHTDAC);
+#ifdef DEBUG
+    Serial.print("R: ");
+    Serial.println(lastSetRightSpeed);
+#endif
+  }
     
   /* Spin down the motors if their timers have expired */
   if (MotorTimer && MotorTimer < millis()) {
