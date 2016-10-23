@@ -26,10 +26,6 @@
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 
-// FIXME: should we check for the 'changing direction' flags in the main loop, and apply them when we reach 0
-// speed in the main loop? Or should we just ignore them, b/c the controller will continue to broadcast, and we 
-// will continue to try to set the speed?
-
 /* Pins used.
  *  
  *  The Moteino communicates with its embedded RFM69 on pins 2, 10, 11, 12, 13.
@@ -39,13 +35,13 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
  *   1 Serial Out (to music board)
  *   2 RFM69: INT0
- *   3 Motor controllers' power key relay
+ *   3 Right brake pin (drag to ground for enabled)
  *   4 SPI CS to DAC for motor #1
- *   5 
- *   6 
- *   7 
+ *   5 Left direction pin (drag to ground for reverse)
+ *   6 Left brake engaged (drag to ground for enabled)
+ *   7 Right direction pin (drag to ground for reverse)
  *   8
- *   9 (onboard LED; reusable if necessary)
+ *   9 (onboard LED; reusable if necessary) - SPI /SS to D/A
  *  10 RFM69
  *  11 RFM69 (also: SPI MOSI to DAC)
  *  12 RFM69
@@ -60,13 +56,18 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
  */
 
-#define PowerRelayPin 3
 #define MotorDACCSPin 4
 #define Motor1DirectionPin 5 // low for "reverse"
 #define Motor2DirectionPin 7 // low for "reverse"
+#define Motor1BrakePin 6 // low for "brake engaged"
+#define Motor2BrakePin 3 // low for "brake engaged"
+
+#define DAC_SDI_PIN 8
+#define DAC_SCK_PIN 9
 
 // Converting to a 4922 - had to modify the library :/
-AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
+//AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
+AH_MCP4921 MotorDAC(DAC_SDI_PIN, DAC_SCK_PIN, MotorDACCSPin); // Using bitbang technique
 #define LEFTDAC 0
 #define RIGHTDAC 1
 
@@ -91,9 +92,12 @@ unsigned long shoulderTimer = 0;
 unsigned long brakeTimer = 0;
 unsigned long gunTimer = 0;
 
+bool brakeIsOn = false;
+
 /* cached settings from last update of remote */
 #define kFORWARD 1
 #define kBACKWARD -1
+#define kZERO 0
 int8_t fb_cache = kFORWARD; // forward/backward setting
 int8_t p_cache = 0; // percentage motor
 bool slowMode = true; // always start in slow mode
@@ -101,60 +105,81 @@ bool slowMode = true; // always start in slow mode
 /* last set values for the motor speed targets */
 int8_t next_left_motor = 0; // current setting, -10 to +10
 int8_t next_right_motor = 0; // current setting, -10 to +10
-int16_t approximate_left_speed = 0;  // our estimate of how fast the motor is going
-int16_t approximate_right_speed = 0; //  ... assumes infinite acceleration and SLEW_RATE decel
-int16_t current_left_target = 0;     // How fast we want the motor to be moving
-int16_t current_right_target = 0;
-int16_t lastSetLeftSpeed = 0;
-int16_t lastSetRightSpeed = 0;
 
-int16_t minValueLeft = 1000;
-int16_t minValueRight = 1000;
+int16_t current_left_target = 0;  // -MAXLEFTMOTOR .. MAXLEFTMOTOR (where we *want* to be)
+int16_t current_left_motor = 0;   // -MAXLEFTMOTOR .. MAXLEFTMOTOR (what the motor is doing)
+int16_t current_right_target = 0;
+int16_t current_right_motor = 0;
+
+#define MINLEFTMOTOR  1000
+#define MAXLEFTMOTOR  1500
+#define MINRIGHTMOTOR 1000
+#define MAXRIGHTMOTOR 1500
+
+#define ACCEL 10
+#define DECEL 200
 
 void timerOneInterrupt()
 {
-  // Update our approximated motor speeds.
+  static uint8_t ctr = 0;
+  if (++ctr != 0)
+    return;
+  
+  // If the brakes are on, then shut down the motors.
+  if (brakeIsOn) {
+    current_left_motor = current_right_motor = 0;
+    return;
+  }
+  
+  // Perform acceleration and deceleration periodically (when the timer fires)
 
-  if (abs(current_left_target) <= minValueLeft) {
-    current_left_target = 0;
-  }
-  if (abs(current_right_target) <= minValueRight) {
-    current_right_target = 0;
-  }
-
-  if (approximate_left_speed >= 0 && current_left_target > 0) {
-    // accelerating forward: assume SLEW_RATE acceleration
-    approximate_left_speed = min(current_left_target, approximate_left_speed + SLEW_RATE);
-  } else if (approximate_left_speed < 0 && current_left_target < 0) {
-    // accelerating backward: assume SLEW_RATE acceleration
-    approximate_left_speed = max(current_left_target, approximate_left_speed - SLEW_RATE);
-  } else if (approximate_left_speed != current_left_target) {
-    // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
-    int16_t maxDelta = min(SLEW_RATE, abs(approximate_left_speed - current_left_target));
-    if (approximate_left_speed > current_left_target) maxDelta = -maxDelta; // get the direction right
-    approximate_left_speed += maxDelta;
-    if (abs(approximate_left_speed) <= minValueLeft) {
-      approximate_left_speed = 0;
-    }
-  }
-
-  if (approximate_right_speed >= 0 && current_right_target > 0) {
-    // accelerating forward: assume SLEW_RATE acceleration
-    approximate_right_speed = min(current_right_target, approximate_right_speed + SLEW_RATE);
-  } else if (approximate_right_speed < 0 && current_right_target < 0) {
-    // accelerating backward: assume SLEW_RATE acceleration
-    approximate_right_speed = max(current_right_target, approximate_right_speed - SLEW_RATE);
-  } else if (approximate_right_speed != current_right_target) {
-    // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
-    int16_t maxDelta = min(SLEW_RATE, abs(approximate_right_speed - current_right_target));
-    if (approximate_right_speed > current_right_target) maxDelta = -maxDelta; // get the direction right
-    approximate_right_speed += maxDelta;
-    if (abs(approximate_right_speed) <= minValueRight) {
-      approximate_right_speed = 0;
-    }
-  }
+  current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
+  current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
 }
 
+int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal)
+{
+  // Constrain before we start
+  if (abs(motor) < minVal) {
+    // don't set to ~1v; set to 0v
+    motor = 0;
+  }
+  if (abs(target) < minVal) {
+    target = 0;
+  }
+  
+  // If we're accelerating, then do so SLOWLY.
+  if (target >= 0 && motor >= 0 && target > motor) {
+    // accelerating forward
+    motor = min(motor + ACCEL, target);
+    motor = max(minVal, motor); // don't set to any values between 0..minVal
+  } else if (target < 0 && motor <= 0 && target < motor) {
+    // accelerating backward
+    motor = max(motor - ACCEL, target);
+    motor = min(-minVal, motor); // don't set to any values between -minVal..0
+  } else if (target < motor) {
+    // slowing down from "too fast forward"
+    motor = max(motor-DECEL, target);
+  } else if (target > motor) {
+    // slowing down from "too fast backward"
+    motor = min(motor + DECEL, target);
+  }
+
+  // Constrain...
+  if (abs(motor) < minVal) {
+    // don't set to ~1v; set to 0v
+    motor = 0;
+  }
+
+  if (abs(motor) > maxVal) {
+    if (motor > 0)
+      motor = maxVal;
+    else
+      motor = -maxVal;
+  }
+
+  return motor;
+}
 void setup()
 {
   MCUSR = 0;  // clear out any flags of prior watchdog resets.
@@ -165,10 +190,15 @@ void setup()
   delay(1000);
 
 
-  pinMode(Motor1DirectionPin, OUTPUT);
+  pinMode(Motor1DirectionPin, INPUT);
   digitalWrite(Motor1DirectionPin, HIGH);
-  pinMode(Motor2DirectionPin, OUTPUT);
+  pinMode(Motor2DirectionPin, INPUT);
   digitalWrite(Motor2DirectionPin, HIGH);
+
+  pinMode(Motor1BrakePin, OUTPUT);
+  digitalWrite(Motor1BrakePin, HIGH);
+  pinMode(Motor2BrakePin, OUTPUT);
+  digitalWrite(Motor2BrakePin, HIGH);
   
   Serial.begin(9600); // Primarily for talking to the music board
 #ifdef DEBUG
@@ -206,37 +236,123 @@ void setup()
   pinMode(shoulderRightPin, OUTPUT);
   pinMode(gunUpPin, OUTPUT);
   pinMode(gunDownPin, OUTPUT);
-  pinMode(PowerRelayPin, OUTPUT);
 
   pinMode(9, OUTPUT); // LED debugging
 
-  wdt_enable(WDTO_1S);
-  
-  digitalWrite(PowerRelayPin, LOW); // tell the controllers it's business time! (This is active-low)
+//  wdt_enable(WDTO_1S);
 
-  Timer1.initialize(100000); // 0.1 second interrupt period
-  Timer1.attachInterrupt(timerOneInterrupt);
+  updateMotors(); // force back to 0 if we oddly rebooted
+
+//  Timer1.initialize(50000); // 0.05 second interrupt period
+//  Timer1.attachInterrupt(timerOneInterrupt);
+}
+
+inline int8_t sign(int16_t v)
+{
+  if (v < 0)
+    return kBACKWARD;
+
+  if (v > 0)
+    return kFORWARD;
+
+  return kZERO;
+}
+
+// Is it ok for us to set the motor to 'wantSetTo' if it was last set to 'lastSetTo'?
+// return true if so, or false to abort.
+bool sanityCheckMotor(int16_t lastSetTo, int16_t wantSetTo)
+{
+  int signLast = sign(lastSetTo);
+  int signWant = sign(wantSetTo);
+
+  // Anything is ok if it was off to begin with. (FIXME: don't try to go too fast.)
+  if (signLast == kZERO)
+    return true;
+
+  // If we want to stop, that's okay.
+  if (signWant == kZERO)
+    return true;
+
+  // Otherwise, expect that we're going in the same direction as we want to.
+  if (signLast != signWant)
+    return false;
+
+  return true;
+}
+
+void updateMotors()
+{
+  static int16_t lastLeftMotor = 0;
+  static int16_t lastRightMotor = 0;
+
+  if (!sanityCheckMotor(lastLeftMotor, current_left_motor) ||
+      !sanityCheckMotor(lastRightMotor, current_right_motor)) {
+#ifdef DEBUG
+    Serial.print(current_left_motor);
+    Serial.print(" ");
+    Serial.print(lastLeftMotor);
+    Serial.println(" ACCEL ERR");
+#endif
+    MotorDAC.setValue(0, LEFTDAC);
+    MotorDAC.setValue(0, RIGHTDAC);
+    return; // refuse to perfrom the update; shut down both motors instead.
+  }
+
+  if (current_left_motor != lastLeftMotor) {
+    lastLeftMotor = current_left_motor;
+    if (sign(lastLeftMotor) == kFORWARD) {
+#ifdef DEBUG
+      Serial.print("FWD ");
+#endif
+      pinMode(Motor1DirectionPin, INPUT);
+      digitalWrite(Motor1DirectionPin, HIGH);
+    } else {
+#ifdef DEBUG
+      Serial.print("REV ");
+#endif
+      pinMode(Motor1DirectionPin, OUTPUT);
+      digitalWrite(Motor1DirectionPin, LOW); // drag to ground
+    }
+    MotorDAC.setValue(abs(lastLeftMotor), LEFTDAC);
+#ifdef DEBUG
+    Serial.println(lastLeftMotor);
+#endif
+  }
+  if (current_right_motor != lastRightMotor) {
+    lastRightMotor = current_right_motor;
+    if (sign(lastRightMotor) == kFORWARD) {
+      pinMode(Motor2DirectionPin, INPUT);
+      digitalWrite(Motor2DirectionPin, HIGH);
+    } else {
+      pinMode(Motor2DirectionPin, OUTPUT);
+      digitalWrite(Motor2DirectionPin, LOW); // drag to ground
+    }
+    MotorDAC.setValue(abs(lastRightMotor), RIGHTDAC);
+  }
 }
 
 // Input l/r: [-10 .. +10]
 void setMotorTargets(int l, int r)
 {
-  // The two motor controllers don't perform identically; we'll need to map them individually.
-  long maxValueLeft = (slowMode ? 1300 : 1400);
-  long maxValueRight = (slowMode ? 1300 : 1400);
-  int left_abs = map(abs(l), 0, 10, minValueLeft, maxValueLeft); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
-  int right_abs = map(abs(r), 0, 10, minValueRight, maxValueRight);
-  int8_t left_dir = (l >= 0)  ? kFORWARD : kBACKWARD;
-  int8_t right_dir = (r >= 0) ? kFORWARD : kBACKWARD;
+  current_left_target = map(abs(l), 0, 10, MINLEFTMOTOR, MAXLEFTMOTOR);
+  current_left_target = constrain(current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
+  if (current_left_target <= MINLEFTMOTOR) {
+    // don't set to ~1v; set to 0v
+    current_left_target = 0;
+  }
+  if (l < 0) {
+    current_left_target = -current_left_target;
+  }
 
-#ifdef DEBUG
-  static char buf[30];
-  sprintf(buf, "%d %d => %c%d %c%d\n", l, r, l < 0 ? '-' : '+', left_abs, r <0 ? '-' : '+', right_abs);
-  Serial.println(buf);
-#endif
-
-  current_left_target = left_abs * left_dir;
-  current_right_target = right_abs * right_dir;
+  current_right_target = map(abs(l), 0, 10, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  current_right_target = constrain(current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  if (current_right_target <= MINRIGHTMOTOR) {
+    // don't set to ~1v; set to 0v
+    current_right_target = 0;
+  }
+  if (l < 0) {
+    current_right_target = -current_right_target;
+  }
 }
 
 void MakeMotorsGo(int l, int r)
@@ -267,26 +383,10 @@ void loop()
 {
   wdt_reset();
 
-  // set the motor DACs based on the current speed, if it changed since last time
-  if (approximate_left_speed != lastSetLeftSpeed) {
-    lastSetLeftSpeed = approximate_left_speed;
-    digitalWrite(Motor1DirectionPin, lastSetLeftSpeed >= 0 ? HIGH : LOW);
-    MotorDAC.setValue(abs(lastSetLeftSpeed), LEFTDAC);
-#ifdef DEBUG
-    Serial.print("L: ");
-    Serial.println(lastSetLeftSpeed);
-#endif
-  }
+  timerOneInterrupt();
 
-  if (approximate_right_speed != lastSetRightSpeed) {
-    lastSetRightSpeed = approximate_right_speed;
-    digitalWrite(Motor2DirectionPin, lastSetRightSpeed >= 0 ? HIGH : LOW);
-    MotorDAC.setValue(abs(lastSetRightSpeed), RIGHTDAC);
-#ifdef DEBUG
-    Serial.print("R: ");
-    Serial.println(lastSetRightSpeed);
-#endif
-  }
+  // set the motor DACs based on the current speed, if it changed since last loop (e.g. from the timer)
+  updateMotors();
     
   /* Spin down the motors if their timers have expired */
   if (MotorTimer && MotorTimer < millis()) {
@@ -309,14 +409,12 @@ void loop()
   }
 
   /* Deal with brakes the same way */
-#if 0
   if (brakeTimer && brakeTimer < millis()) {
     brakeTimer = 0;
-//    setBrake(LOW);
+    setBrake(false); // turn off the brake
   }
-#endif
   
-  /* See if we have new RF commands waiting to be received */
+  /* See if we have new RF commands waiting to be received - make sure timer doesn't go off while we do */
 
   if (radio.receiveDone()) {
     if (radio.DATALEN >= 4 && radio.DATA[0] == 'F' && radio.DATA[1] == 'L' && radio.DATA[2] == 'X' && radio.DATA[3] == '?') {
@@ -344,7 +442,7 @@ void loop()
       switch (radio.DATA[i]) {
         case '*':
           // Restart!
-          ForceRestart();
+          //ForceRestart();
           break;
         /* Forward or backward mode for next command */
         case 'F':
@@ -422,19 +520,24 @@ void loop()
         case 'm':
           startMusic( MUSIC_NONE );
           SetTimer(&brakeTimer);
-          setBrake();
+          setBrake(true);
           break;
       }
     }
   }
 }
 
-void setBrake() {
-  ForceRestart(); // FIXME: not what I intended, but good enough for now
+void setBrake(bool isOn) {
+  brakeIsOn = isOn;
+  digitalWrite(Motor1BrakePin, brakeIsOn ? LOW : HIGH);
+  digitalWrite(Motor2BrakePin, brakeIsOn ? LOW : HIGH);
 }
 
 void ForceRestart()
 {
+#ifdef DEBUG
+  Serial.println("Forcing WDT restart...");
+#endif
   wdt_enable(WDTO_15MS);
   while(1) ;
 }
