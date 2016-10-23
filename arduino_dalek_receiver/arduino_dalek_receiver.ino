@@ -112,13 +112,13 @@ int16_t current_right_target = 0;
 int16_t current_right_motor = 0;
 
 #define MINLEFTMOTOR  1000
-#define MAXLEFTMOTOR  1500
-#define MINRIGHTMOTOR 1000
-#define MAXRIGHTMOTOR 1500
+#define MAXLEFTMOTOR  1050
+#define MINRIGHTMOTOR 1050
+#define MAXRIGHTMOTOR 1100
 
-#define ACCEL 10
+#define ACCEL 5
 #define DECEL 200
-#define STOPRANGE 250
+#define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
 
 void timerOneInterrupt()
 {
@@ -144,6 +144,10 @@ int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_
   if (abs(target) < minVal) {
     target = 0;
   }
+
+  // If we reached the minimum value, then we're stopped.
+  if (target == motor && abs(target) == minVal)
+    motor = 0;
   
   // If we're accelerating, then do so SLOWLY.
   if (target >= 0 && motor >= 0 && target > motor) {
@@ -155,13 +159,12 @@ int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_
   } else if (target < motor) {
     // slowing down from "too fast forward"
     motor = max(motor-DECEL, target);
-    // If we get near zero, then set it to zero
-    if (abs(motor) < STOPRANGE)
+    if (abs(motor) <= MINBRAKEVAL)
       motor = 0;
   } else if (target > motor) {
     // slowing down from "too fast backward"
     motor = min(motor + DECEL, target);
-    if (abs(motor) < STOPRANGE)
+    if (abs(motor) <= MINBRAKEVAL)
       motor = 0;
   }
 
@@ -322,6 +325,8 @@ void updateMotors()
 void setMotorTargets(int l, int r)
 {
   current_left_target = map(abs(l), 0, 10, MINLEFTMOTOR, MAXLEFTMOTOR);
+  if (current_left_target == MINLEFTMOTOR)
+    current_left_target = 0;
   current_left_target = constrain(current_left_target, MINLEFTMOTOR, MAXLEFTMOTOR);
 
   if (l < 0) {
@@ -329,6 +334,8 @@ void setMotorTargets(int l, int r)
   }
 
   current_right_target = map(abs(r), 0, 10, MINRIGHTMOTOR, MAXRIGHTMOTOR);
+  if (current_right_target == MINRIGHTMOTOR)
+    current_right_target = 0;
   current_right_target = constrain(current_right_target, MINRIGHTMOTOR, MAXRIGHTMOTOR);
 
   if (r < 0) {
