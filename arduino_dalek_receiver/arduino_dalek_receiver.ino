@@ -6,6 +6,7 @@
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
 #include <avr/wdt.h>
 #include <AH_MCP4921.h>
+#include <TimerOne.h>      // used for current speed approximation
 
 #undef DEBUG
 
@@ -24,6 +25,10 @@
 
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
+
+// FIXME: should we check for the 'changing direction' flags in the main loop, and apply them when we reach 0
+// speed in the main loop? Or should we just ignore them, b/c the controller will continue to broadcast, and we 
+// will continue to try to set the speed?
 
 /* Pins used.
  *  
@@ -56,13 +61,14 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  */
 
 #define PowerRelayPin 3
-#define Motor1DACCSPin 4
+#define MotorDACCSPin 4
 #define Motor1DirectionPin 5 // low for "reverse"
-#define Motor2DACCSPin 6
 #define Motor2DirectionPin 7 // low for "reverse"
 
-AH_MCP4921 Motor1DAC(Motor1DACCSPin); // CS pin (uses SPI library)
-AH_MCP4921 Motor2DAC(Motor2DACCSPin); // CS pin (uses SPI library)
+// Converting to a 4922 - had to modify the library :/
+AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
+#define LEFTDAC 0
+#define RIGHTDAC 1
 
 #define shoulderLeftPin A4
 #define shoulderRightPin A5
@@ -75,71 +81,139 @@ AH_MCP4921 Motor2DAC(Motor2DACCSPin); // CS pin (uses SPI library)
 
 // FLOAT_TIME is how long we should continue to obey a pulse that came in
 #define FLOAT_TIME 200
+// SLEW_RATE is how fast the motor slows down on its own. We need this b/c the controllers I'm using 
+// won't go in to reverse if the motor is still spinning forward (or vice versa, maybe?)
+// This is in "units of DAC input per TimerOne interrupt" (an odd metric, to be sure)
+#define SLEW_RATE 250
 
 unsigned long MotorTimer = 0;
 unsigned long shoulderTimer = 0;
 unsigned long brakeTimer = 0;
 unsigned long gunTimer = 0;
-unsigned long HeartbeatCheckTimer = 0;
 
 /* cached settings from last update of remote */
-#define kFORWARD 0
-#define kBACKWARD 1
-int fb_cache = kFORWARD; // forward/backward setting
-int p_cache = 0; // percentage motor
-int slowMode = 1; // always start in slow mode
+#define kFORWARD 1
+#define kBACKWARD -1
+int8_t fb_cache = kFORWARD; // forward/backward setting
+int8_t p_cache = 0; // percentage motor
+bool slowMode = true; // always start in slow mode
 
 /* last set values for the motor speed targets */
-int next_left_motor = 0; // current setting, -10 to +10
-int next_right_motor = 0; // current setting, -10 to +10
+int8_t next_left_motor = 0; // current setting, -10 to +10
+int8_t next_right_motor = 0; // current setting, -10 to +10
+int16_t approximate_left_speed = 0;  // our estimate of how fast the motor is going
+int16_t approximate_right_speed = 0; //  ... assumes infinite acceleration and SLEW_RATE decel
+int16_t current_left_target = 0;     // How fast we want the motor to be moving
+int16_t current_right_target = 0;
+bool leftMotorChangingDirection = false;
+bool rightMotorChangingDirection = false;
+
+void timerOneInterrupt()
+{
+  // Update our approximated motor speeds.
+
+  if (approximate_left_speed >= 0 && current_left_target > 0) {
+    // accelerating forward: assume infinite acceleration
+    approximate_left_speed = current_left_target;
+  } else if (approximate_left_speed < 0 && current_left_target < 0) {
+    // accelerating backward: assume infinite acceleration
+    approximate_left_speed = current_left_target;
+  } else if (approximate_left_speed != current_left_target) {
+    // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
+    int16_t maxDelta = min(SLEW_RATE, abs(approximate_left_speed - current_left_target));
+    if (approximate_left_speed > current_left_target) maxDelta = -maxDelta; // get the direction right
+    approximate_left_speed += maxDelta;
+  }
+
+  if (approximate_right_speed >= 0 && current_right_target > 0) {
+    // accelerating forward: assume infinite acceleration
+    approximate_right_speed = current_right_target;
+  } else if (approximate_right_speed < 0 && current_right_target < 0) {
+    // accelerating backward: assume infinite acceleration
+    approximate_right_speed = current_right_target;
+  } else if (approximate_right_speed != current_right_target) {
+    // decelerating - either forward or backward. Constrain this to our maximum SLEW_RATE.
+    int16_t maxDelta = min(SLEW_RATE, abs(approximate_right_speed - current_right_target));
+    if (approximate_right_speed > current_right_target) maxDelta = -maxDelta; // get the direction right
+    approximate_right_speed += maxDelta;
+  }
+}
 
 void setup()
 {
   MCUSR = 0;  // clear out any flags of prior watchdog resets.
 
+  // ensure the CS line is driven very early
+  pinMode(MotorDACCSPin, OUTPUT);
+  digitalWrite(MotorDACCSPin, HIGH); // active-low, so we want it high...
+  delay(1000);
+
+
   pinMode(Motor1DirectionPin, OUTPUT);
-  digitalWrite(Motor1DirectionPin, HIGH); // pull-up enabled
+  digitalWrite(Motor1DirectionPin, HIGH);
+  pinMode(Motor2DirectionPin, OUTPUT);
+  digitalWrite(Motor2DirectionPin, HIGH);
   
   Serial.begin(9600); // Primarily for talking to the music board
 #ifdef DEBUG
   Serial.println("Debug enabled");
 #endif
 
-  radio.initialize(FREQUENCY, NODEID, NETWORKID);
+  if (!radio.initialize(FREQUENCY, NODEID, NETWORKID)) {
+#ifdef DEBUG
+    Serial.println("Failed to init RFM69");
+    delay(1000);
+    ForceRestart();
+#endif
+  } else {
+#ifdef DEBUG
+    Serial.println("RFM69 initialized");
+#endif  
+  }
   radio.encrypt(ENCRYPTKEY);
 #ifdef IS_RFM69HW
   radio.setHighPower(); //only for RFM69HW!
 #endif
+  
+  if (!flash.initialize()) {
 #ifdef DEBUG
-  Serial.println("RFM69 initialized");
-#endif  
-  flash.initialize();
+    Serial.println("Failed to init flash");
+#endif    
+  } else {
+#ifdef DEBUG
+    Serial.println("Flash intialized");
+#endif    
+    
+  }
 
   pinMode(shoulderLeftPin, OUTPUT);
   pinMode(shoulderRightPin, OUTPUT);
   pinMode(gunUpPin, OUTPUT);
   pinMode(gunDownPin, OUTPUT);
   pinMode(PowerRelayPin, OUTPUT);
-  pinMode(Motor1DACCSPin, OUTPUT);
-  pinMode(Motor2DACCSPin, OUTPUT);
 
   pinMode(9, OUTPUT); // LED debugging
 
   wdt_enable(WDTO_1S);
   
   digitalWrite(PowerRelayPin, LOW); // tell the controllers it's business time! (This is active-low)
+
+  Timer1.initialize(100000); // 0.1 second interrupt period
+  Timer1.attachInterrupt(timerOneInterrupt);
 }
 
 // Input l/r: [-10 .. +10]
 void setMotorTargets(int l, int r)
 {
   // The two motor controllers don't perform identically; we'll need to map them individually.
-long minValueLeft = 800;
-  long minValueRight = 800;
-  long maxValueLeft = (slowMode ? 1500 : 2500);
-  long maxValueRight = (slowMode ? 1500 : 2500);
+long minValueLeft = 1000;
+  long minValueRight = 1000;
+  long maxValueLeft = (slowMode ? 1300 : 1400);
+  long maxValueRight = (slowMode ? 1300 : 1400);
   int left_abs = map(abs(l), 0, 10, minValueLeft, maxValueLeft); // low-end cutoff is 1v (~800/4096); high point is ~3v (~2500/4096). DAC is 12-bit (0-to-4096)
   int right_abs = map(abs(r), 0, 10, minValueRight, maxValueRight);
+  int8_t left_dir = (l >= 0)  ? kFORWARD : kBACKWARD;
+  int8_t right_dir = (r >= 0) ? kFORWARD : kBACKWARD;
 
 #ifdef DEBUG
   static char buf[30];
@@ -147,27 +221,43 @@ long minValueLeft = 800;
   Serial.println(buf);
 #endif
 
-
-
-  if (l >= 0) {
-    digitalWrite(Motor1DirectionPin, HIGH); // forward!
-  } else {
-    digitalWrite(Motor1DirectionPin, LOW); // backward!
-  }
-  if (r >= 0) {
-    digitalWrite(Motor2DirectionPin, HIGH);
-  } else {
-    digitalWrite(Motor2DirectionPin, LOW);
-  }
   if (left_abs <= minValueLeft) {
     left_abs = 0; // don't set to < 1v; set to 0v instead.
   }
   if (right_abs <= minValueRight) {
     right_abs = 0;
   }
-  
-  Motor1DAC.setValue(left_abs);
-  Motor2DAC.setValue(right_abs);
+
+  current_left_target = abs(left_abs) * left_dir;
+  current_right_target = abs(right_abs) * right_dir;
+
+  if (current_left_target * approximate_left_speed < 0) {
+    // one of them is backward, one is forward; we can't do that. Wait until the motor slows down.
+    // FIXME: could apply brake?
+    leftMotorChangingDirection = true;
+  } else {
+    // Apply the change.
+    leftMotorChangingDirection = false;
+    digitalWrite(Motor1DirectionPin, (left_dir == kFORWARD) ? HIGH : LOW);
+    MotorDAC.setValue(left_abs, LEFTDAC);
+  }
+
+#ifdef DEBUG
+Serial.print("crt: ");
+Serial.print(current_right_target);
+Serial.print(" ars: ");
+Serial.println(approximate_right_speed);
+#endif
+  if (current_right_target * approximate_right_speed < 0) {
+    // one of them is backward, one is forward; we can't do that. Wait until the motor slows down.
+    // FIXME: could apply brake?
+    rightMotorChangingDirection = true;
+  } else {
+    // Apply the change.
+    rightMotorChangingDirection = false;
+    digitalWrite(Motor2DirectionPin, (right_dir == kFORWARD) ? HIGH : LOW);
+    MotorDAC.setValue(right_abs, RIGHTDAC);
+  }
 }
 
 void MakeMotorsGo(int l, int r)
@@ -238,7 +328,7 @@ void loop()
 
     bool wantStartMusic = false;
     for (unsigned char i=0; i < radio.DATALEN; i++) {
-#ifdef DEBUG
+#ifdef DEBUG2
       // debugging
       static char buf[2] = {0, 0};
       buf[0] = radio.DATA[i];
@@ -292,16 +382,15 @@ void loop()
           
         /* Pulse the motors at the given values */
         case 'G':
-          // Note that we reverse the sense of the right motor here b/c brushless, clockwise, etc.
-          MakeMotorsGo(next_left_motor, -next_right_motor);
+          MakeMotorsGo(next_left_motor, next_right_motor);
           break;
 
         /* Slow/fast mode */
         case '+':
-          slowMode = 0;
+          slowMode = false;
           break;
         case '-':
-          slowMode = 1;
+          slowMode = true;
           break;
   
         /* Shoulder rotation commands */          
