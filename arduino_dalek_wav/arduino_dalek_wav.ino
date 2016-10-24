@@ -3,8 +3,8 @@
 #include <SoftwareSerial.h>
 
 /* two control pins */
-#define ctl1 A0
-#define ctl2 A1
+#define SSRX_PIN A0
+#define SSTX_PIN A1
 
 SdReader card;    // This object holds the information for the card
 FatVolume vol;    // This holds the information for the partition on the card
@@ -23,7 +23,7 @@ char *fileNames[FILE_COUNT] = { "0.WAV", "1.WAV", "2.WAV", "3.WAV", "4.WAV", "5.
 uint16_t fileIndex[FILE_COUNT];
 
 
-SoftwareSerial softSerial(ctl1, ctl2); // RX, TX
+SoftwareSerial softSerial(SSRX_PIN, SSTX_PIN); // RX, TX
 
 /*
  * Define macro to put error messages in flash memory
@@ -46,9 +46,6 @@ void setup() {
 
   PgmPrintln("Index files");
   indexFiles();
-  
-  pinMode(ctl1, INPUT);
-  pinMode(ctl2, INPUT);
 }
 
 uint8_t readPins()
