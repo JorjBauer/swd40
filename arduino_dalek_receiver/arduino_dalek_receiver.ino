@@ -7,8 +7,9 @@
 #include <avr/wdt.h>
 #include <AH_MCP4921.h>
 #include <TimerOne.h>      // used for current speed approximation
+#include <SoftwareSerial.h>
 
-#define DEBUG
+#undef DEBUG // note: interferes with music board operation, b/c that's also on the serial line. Only useful for debugging when the music controller is disconnected.
 
 /* Moteino constants */
 #define NODEID      30
@@ -23,9 +24,12 @@
 #endif
 #define FLASH_SS 8
 
+#define SSERRX 9 // Not used; doubled up with onboard LED
+#define SSERTX A0
+
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
-
+SoftwareSerial softSerial(SSERRX, SSERTX);
 /* Pins used.
  *  
  *  The Moteino communicates with its embedded RFM69 on pins 2, 10, 11, 12, 13.
@@ -33,27 +37,26 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
  *  Ping A6 and A7 are analog input only.
  *  
  *   0 (not used, but would be serial in; can't disable b/c using SerialOut)
- *   1 Serial Out (to music board)
+ *   1 Serial Out to music board; 9600 baud
  *   2 RFM69: INT0
  *   3 Right brake pin (drag to ground for enabled)
- *   4 SPI CS to DAC for motor #1
+ *   4 SPI CS to (dual) DAC for both motors
  *   5 Left direction pin (drag to ground for reverse)
  *   6 Left brake engaged (drag to ground for enabled)
  *   7 Right direction pin (drag to ground for reverse)
- *   8
- *   9 (onboard LED; reusable if necessary) - SPI /SS to D/A
+ *   8 Flash /SS pin
+ *   9 (onboard LED; reusable if necessary)
  *  10 RFM69
  *  11 RFM69 (also: SPI MOSI to DAC)
  *  12 RFM69
  *  13 RFM69 (also: SPI CLK to DAC)
- *  14/A0 
+ *  14/A0 Software Serial out to shoulder controller board (9600 baud)
  *  15/A1 
- *  16/A2 gunUpPin
- *  17/A3 gunDownPin
- *  18/A4 shoulderLeftPin
- *  19/A5 shoulderRightPin
+ *  16/A2 
+ *  17/A3 
+ *  18/A4 DAC SCK
+ *  19/A5 DAC SDI
  *
- *  If we start running out of pins, we should convert gun and shoulder motors to use a serial protocol.
  */
 
 #define MotorDACCSPin 4
@@ -62,20 +65,14 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 #define Motor1BrakePin 6 // low for "brake engaged"
 #define Motor2BrakePin 3 // low for "brake engaged"
 
-#define DAC_SDI_PIN 8
-#define DAC_SCK_PIN 9
+#define DAC_SDI_PIN A5
+#define DAC_SCK_PIN A4
 
 // Converting to a 4922 - had to modify the library :/
 //AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
 AH_MCP4921 MotorDAC(DAC_SDI_PIN, DAC_SCK_PIN, MotorDACCSPin); // Using bitbang technique
 #define LEFTDAC 0
 #define RIGHTDAC 1
-
-#define shoulderLeftPin A4
-#define shoulderRightPin A5
-
-#define gunUpPin A2
-#define gunDownPin A3
 
 // fixme; these constants belong somewhere else
 #define MUSIC_NONE 0
@@ -88,9 +85,7 @@ AH_MCP4921 MotorDAC(DAC_SDI_PIN, DAC_SCK_PIN, MotorDACCSPin); // Using bitbang t
 #define SLEW_RATE 10
 
 unsigned long MotorTimer = 0;
-unsigned long shoulderTimer = 0;
 unsigned long brakeTimer = 0;
-unsigned long gunTimer = 0;
 
 bool brakeIsOn = false;
 
@@ -229,6 +224,7 @@ void setup()
 #ifdef DEBUG
   Serial.println("Debug enabled");
 #endif
+  softSerial.begin(9600); // For talking with the shoulder motor controller
 
   if (!radio.initialize(FREQUENCY, NODEID, NETWORKID)) {
 #ifdef DEBUG
@@ -256,13 +252,6 @@ void setup()
 #endif    
     
   }
-
-  pinMode(shoulderLeftPin, OUTPUT);
-  pinMode(shoulderRightPin, OUTPUT);
-  pinMode(gunUpPin, OUTPUT);
-  pinMode(gunDownPin, OUTPUT);
-
-  pinMode(9, OUTPUT); // LED debugging
 
 //  wdt_enable(WDTO_1S);
 
@@ -412,20 +401,6 @@ void loop()
     setMotorTargets(0, 0);
   }
 
-  /* Same with the signaling for the shoulder motors */  
-  if (shoulderTimer && shoulderTimer < millis()) {
-    shoulderTimer = 0;
-    digitalWrite(shoulderLeftPin, LOW);
-    digitalWrite(shoulderRightPin, LOW);
-  }
-
-  /* Same with the signaling for the gun aiming motor */
-  if (gunTimer && gunTimer < millis()) {
-    gunTimer = 0;
-    digitalWrite(gunUpPin, LOW);
-    digitalWrite(gunDownPin, LOW);
-  }
-
   /* Deal with brakes the same way */
   if (brakeTimer && brakeTimer < millis()) {
     brakeTimer = 0;
@@ -511,25 +486,17 @@ void loop()
   
         /* Shoulder rotation commands */          
         case '(':
-          SetTimer(&shoulderTimer);
-          digitalWrite(shoulderRightPin, LOW);
-          digitalWrite(shoulderLeftPin, HIGH);
+          softSerial.write('L');
           break;
         case ')':
-          SetTimer(&shoulderTimer);
-          digitalWrite(shoulderLeftPin, LOW);
-          digitalWrite(shoulderRightPin, HIGH);
+          softSerial.write('R');
           break;
   
         case '^':
-          SetTimer(&gunTimer);
-          digitalWrite(gunUpPin, HIGH);
-          digitalWrite(gunDownPin, LOW);
+          softSerial.write('+');
           break;
         case 'v':
-          SetTimer(&gunTimer);
-          digitalWrite(gunUpPin, LOW);
-          digitalWrite(gunDownPin, HIGH);
+          softSerial.write('-');
           break;
           
         case 'M':
