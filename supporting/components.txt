@@ -1,8 +1,7 @@
 A1
-  Arduino Uno
+  Moteino with RFM69 and onboard flash
   Code: arduino_dalek_sender.ino
   runs from +12v
-  Daughterboards: RFM12B (homemade)
   Purpose: primary controller. Listens on RF; drives primary motor controllers;
     delegates commands to other arduinos over serial.
 
@@ -28,3 +27,5 @@ Not listed:
 
 remote control ("sender")
   Wii controller version of the sender
+  based on a Moteino with RFM69 (HW)
+  110mah lithium-ion battery
