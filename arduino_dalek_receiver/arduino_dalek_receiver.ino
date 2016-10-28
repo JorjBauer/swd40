@@ -123,9 +123,9 @@ bool decelRight = false;
 #define MAXFASTRIGHTMOTOR 1300
 
 // FIXME: make left/right
-#define MAXTURNSPEED 1050
+#define MAXTURNSPEED 1020
 
-#define ACCEL 5
+#define ACCEL 1
 #define STOPPEDACCEL 40 // necessary to give the controllers time between fwd and rev
 #define DECEL 200
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
@@ -152,6 +152,14 @@ void timerOneInterrupt()
 
   current_left_motor = performAccelerationWithConstraints(current_left_motor, current_left_target, MINLEFTMOTOR, maxLeftSpeed, &decelLeft);
   current_right_motor = performAccelerationWithConstraints(current_right_motor, current_right_target, MINRIGHTMOTOR, maxRightSpeed, &decelRight);
+
+  if (sign(current_left_motor) != sign(current_right_motor)) {
+    // turning hack
+    if (current_left_motor > 0)
+      current_right_motor = 0;
+    else
+      current_left_motor = 0;
+  }
 }
 
 int16_t performAccelerationWithConstraints(int16_t motor, int16_t target, int16_t minVal, int16_t maxVal, bool *isDecelOut)

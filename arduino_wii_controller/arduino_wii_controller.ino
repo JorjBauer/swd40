@@ -132,6 +132,24 @@ void setup() {
 #endif
 }
 
+// "in" from 0-100, linear; translated to nonlinear 0-100 that favors           
+// the lower end                                                                
+int trans(int in)
+{
+  // The base 2/3 should be half of the output                                  
+  if (in <= 66) {
+    return map(in, 0, 66, 0, 50);
+  }
+
+  // 2/3 of what remains should be the next 80%                                 
+  if (in <= 88) {
+    return map(in, 66, 88, 50, 90);
+  }
+
+  // And the remainder                                                          
+  return map(in, 88, 100, 90, 100);
+}
+
 void SendNewState(char motor, int state)
 {
   int fb_want;
@@ -267,6 +285,23 @@ uint8_t ReadRightJoystick(float *x, float *y)
   } else if (udAnalog > rcy + RIGHT_CENTER_RANGE) {
     float range = 31.0 - (rcy + RIGHT_CENTER_RANGE);
     *y = (float)(udAnalog - rcy - RIGHT_CENTER_RANGE) / range;
+  }
+
+  // Translate: make the center region of the joystick "bigger" and the outer ring "smaller" so that it's easier to go slowly
+  int tmp = (int)abs(((float)(*x) * (float)100.0));
+  tmp = trans(tmp);
+  if (*x > 0) {
+    *x = (float)tmp / (float)100.0;
+  } else {
+    *x = -(float)tmp / (float)100.0;
+  }
+  
+  tmp = (int)abs(((float)(*y) * (float)100.0));
+  tmp = trans(tmp);
+  if (*y > 0) {
+    *y = (float)tmp / (float)100.0;
+  } else {
+    *y = -(float)tmp / (float)100.0;
   }
 
   return 1;
