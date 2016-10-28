@@ -52,11 +52,12 @@ SoftwareSerial softSerial(SSERRX, SSERTX);
  *  13 RFM69 (also: SPI CLK to DAC)
  *  14/A0 Software Serial out to shoulder controller board (9600 baud)
  *  15/A1 
- *  16/A2 
+ *  16/A2 Power switch LED
  *  17/A3 
  *  18/A4 DAC SCK
  *  19/A5 DAC SDI
- *
+ *  x /A6
+ *  x /A7 Power in from 10k/82k voltage divider off of battery
  */
 
 #define MotorDACCSPin 4
@@ -67,6 +68,8 @@ SoftwareSerial softSerial(SSERRX, SSERTX);
 
 #define DAC_SDI_PIN A5
 #define DAC_SCK_PIN A4
+
+#define LED_PIN A2
 
 // Converting to a 4922 - had to modify the library :/
 //AH_MCP4921 MotorDAC(MotorDACCSPin); // CS pin (uses SPI library)
@@ -86,6 +89,10 @@ AH_MCP4921 MotorDAC(DAC_SDI_PIN, DAC_SCK_PIN, MotorDACCSPin); // Using bitbang t
 
 unsigned long MotorTimer = 0;
 unsigned long brakeTimer = 0;
+unsigned long ledTimer = 0;
+
+int led_brightness = 255;
+int led_direction = -5;
 
 bool brakeIsOn = false;
 
@@ -118,7 +125,7 @@ bool decelRight = false;
 // FIXME: make left/right
 #define MAXTURNSPEED 1050
 
-#define ACCEL 10
+#define ACCEL 5
 #define STOPPEDACCEL 40 // necessary to give the controllers time between fwd and rev
 #define DECEL 200
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
@@ -209,6 +216,8 @@ void setup()
   digitalWrite(MotorDACCSPin, HIGH); // active-low, so we want it high...
   delay(1000);
 
+  pinMode(LED_PIN, OUTPUT);
+  analogWrite(LED_PIN, 128); // This isn't an LED; it's a 5v lamp. 127 is off. 128 is on.
 
   pinMode(Motor1DirectionPin, INPUT);
   digitalWrite(Motor1DirectionPin, HIGH);
@@ -406,7 +415,23 @@ void loop()
     brakeTimer = 0;
     setBrake(false); // turn off the brake
   }
-  
+
+  /* Blinky Blinky little light */
+#if 0
+if (millis() >= ledTimer) {
+    led_brightness += led_direction;
+    if (led_brightness <= 0 || led_brightness >= 255) {
+      if (led_brightness < 0)
+        led_brightness = 0;
+      if (led_brightness > 255)
+        led_brightness = 255;
+
+      led_direction = -led_direction;
+    }
+    analogWrite(LED_PIN, led_brightness);
+    ledTimer = millis() + 50; // FIXME: pulse faster/slower depending on voltage
+  }  
+#endif
   /* See if we have new RF commands waiting to be received - make sure timer doesn't go off while we do */
 
   if (radio.receiveDone()) {

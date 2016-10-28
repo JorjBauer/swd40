@@ -1,6 +1,0 @@
-Receiver:
-
-A2 -> white ring -> WAV board pin A0
-A3 -> green ring -> WAV board pin A1
-A4 -> yellow shoulder board, pin 6
-A5 -> blue should board, pin 7
