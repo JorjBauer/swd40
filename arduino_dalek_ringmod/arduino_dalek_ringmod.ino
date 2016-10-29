@@ -16,6 +16,7 @@
 #include <SD.h>
 #include <SerialFlash.h>
 
+
 // GUItool: begin automatically generated code
 AudioPlaySdWav           playSdWav1;     //xy=130,315
 AudioInputI2S            i2s1;           //xy=133,203
@@ -25,13 +26,14 @@ AudioMixer4              mixer1;         //xy=590,244
 AudioOutputI2S           i2s2;           //xy=938,273
 AudioConnection          patchCord1(playSdWav1, 0, mixer1, 2);
 AudioConnection          patchCord2(playSdWav1, 1, mixer1, 3);
-AudioConnection          patchCord3(i2s1, 0, multiply1, 1);
+AudioConnection          patchCord3(i2s1, 1, multiply1, 1);
 AudioConnection          patchCord4(waveform1, 0, multiply1, 0);
 AudioConnection          patchCord5(multiply1, 0, mixer1, 0);
 AudioConnection          patchCord6(mixer1, 0, i2s2, 0);
 AudioConnection          patchCord7(mixer1, 0, i2s2, 1);
 AudioControlSGTL5000     sgtl5000_1;     //xy=478,463
 // GUItool: end automatically generated code
+
 
 // Number of files.
 #define FILE_COUNT 10
@@ -40,7 +42,8 @@ char *fileNames[FILE_COUNT] = { "0.WAV", "1.WAV", "2.WAV", "3.WAV", "4.WAV", "5.
 
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
+  Serial1.begin(9600);
 
   // Jorj: guessing that ~100 buffers are okay with the recording we're doing?
   AudioMemory(100);
@@ -61,7 +64,10 @@ void setup() {
  * 42.85 masterplan
  * dalek invasion of earth: 18.75, 29.12, 29.7, 30.6, 34.5
  */
-  waveform1.begin(1.0, 32.25, WAVEFORM_SINE);
+//  waveform1.begin(1.0, 32.25, WAVEFORM_SINE);
+  waveform1.begin(WAVEFORM_SINE);
+  waveform1.amplitude(1.0);
+  waveform1.frequency(32.25);
 
   SPI.setMOSI(7);
   SPI.setSCK(14);
@@ -95,20 +101,32 @@ void playFile(const char *filename)
 
 void playByIndex(int i)
 {
+  mixer1.gain(0, 0.0); // enable live voice input
+  mixer1.gain(2, 0.5); // disable the wav file channels
+  mixer1.gain(3, 0.5);
+  
   if (i >= 0 && i < FILE_COUNT) {
     playFile(fileNames[i]);
   }
 }
 
+void playLiveInput()
+{
+  mixer1.gain(0, 1.0); // enable live voice input
+  mixer1.gain(2, 0.0); // disable the wav file channels
+  mixer1.gain(3, 0.0);
+}
 
 void loop() {
-  if (Serial.available()) {
-    uint8_t c = Serial.read();
+  if (Serial1.available()) {
+    uint8_t c = Serial1.read();
     Serial.println(c);
     if (c >= '0' && c <= '9') {
       playByIndex(c - '0');
     } else if (c == 0) {
       playSdWav1.stop();
+    } else if (c == ':') {
+      playLiveInput();
     }
   }
 }
