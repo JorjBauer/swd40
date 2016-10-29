@@ -50,8 +50,10 @@ void setup() {
   // Jorj: guessing that ~100 buffers are okay with the recording we're doing?
   AudioMemory(100);
 
-  mixer1.gain(0, 1.0); // enable live voice input
-  mixer1.gain(2, 0.0); // disable the wav file channels
+  // Shut off all the mixer channels by default
+  mixer1.gain(0, 0.0);
+  mixer1.gain(1, 0.0);
+  mixer1.gain(2, 0.0);
   mixer1.gain(3, 0.0);
 
 /* jorj
@@ -129,6 +131,10 @@ void loop() {
       playByIndex(c - '0');
     } else if (c == 0) {
       playSdWav1.stop();
+      mixer1.gain(0, 0.0);
+      mixer1.gain(1, 0.0);
+      mixer1.gain(2, 0.0);
+      mixer1.gain(3, 0.0);
     } else if (c == ':') {
       playLiveInput();
     }

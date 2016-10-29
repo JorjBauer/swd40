@@ -371,17 +371,13 @@ int HandleSounds()
   // Sound-related buttons, in order of priority (only one will send at a time)
 
   if (ctrl.lzPressed() || ctrl.rzPressed()) {
-    rf_send('m');
-    // Force the next motor update to stop the motors, too
-    target_lm_state = target_rm_state = 0;
-    lm_state = rm_state = 1;
+    rf_send("M4", 2);
     ret = 1;
   } else if (ctrl.leftShoulderPressed() || ctrl.leftShouldPressure()) {
     // firing noise
     rf_send("m", 1);
     target_lm_state = target_rm_state = 0;
     lm_state = rm_state = 1;
-//    rf_send("M4", 2);
     ret = 1;
   } else if (ctrl.rightShoulderPressed() || ctrl.rightShouldPressure()) {
     // "Exterminate!"
@@ -397,7 +393,7 @@ int HandleSounds()
     rf_send("M7", 2);
     ret = 1;
   } else if (ctrl.upDPressed()) {
-    rf_send("M8", 2);
+    rf_send("M:", 2);
     ret = 1;
   } else if (ctrl.downDPressed()) {
     rf_send("M9", 2);
