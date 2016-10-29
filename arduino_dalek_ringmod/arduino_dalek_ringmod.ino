@@ -18,19 +18,21 @@
 
 
 // GUItool: begin automatically generated code
+AudioInputI2S            i2s1;           //xy=67.4444465637207,220.77777481079102
 AudioPlaySdWav           playSdWav1;     //xy=130,315
-AudioInputI2S            i2s1;           //xy=133,203
 AudioSynthWaveform       waveform1;      //xy=149,116
+AudioEffectBitcrusher    bitcrusher1;    //xy=245.65656280517578,216.76769256591797
 AudioEffectMultiply      multiply1;      //xy=406,183
 AudioMixer4              mixer1;         //xy=590,244
 AudioOutputI2S           i2s2;           //xy=938,273
-AudioConnection          patchCord1(playSdWav1, 0, mixer1, 2);
-AudioConnection          patchCord2(playSdWav1, 1, mixer1, 3);
-AudioConnection          patchCord3(i2s1, 1, multiply1, 1);
+AudioConnection          patchCord1(i2s1, 1, bitcrusher1, 0);
+AudioConnection          patchCord2(playSdWav1, 0, mixer1, 2);
+AudioConnection          patchCord3(playSdWav1, 1, mixer1, 3);
 AudioConnection          patchCord4(waveform1, 0, multiply1, 0);
-AudioConnection          patchCord5(multiply1, 0, mixer1, 0);
-AudioConnection          patchCord6(mixer1, 0, i2s2, 0);
-AudioConnection          patchCord7(mixer1, 0, i2s2, 1);
+AudioConnection          patchCord5(bitcrusher1, 0, multiply1, 1);
+AudioConnection          patchCord6(multiply1, 0, mixer1, 0);
+AudioConnection          patchCord7(mixer1, 0, i2s2, 0);
+AudioConnection          patchCord8(mixer1, 0, i2s2, 1);
 AudioControlSGTL5000     sgtl5000_1;     //xy=478,463
 // GUItool: end automatically generated code
 
@@ -68,6 +70,8 @@ void setup() {
   waveform1.begin(WAVEFORM_SINE);
   waveform1.amplitude(1.0);
   waveform1.frequency(32.25);
+
+  bitcrusher1.bits(8);
 
   SPI.setMOSI(7);
   SPI.setSCK(14);
