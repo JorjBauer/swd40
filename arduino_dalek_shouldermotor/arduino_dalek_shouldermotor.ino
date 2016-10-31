@@ -5,7 +5,7 @@ DualMC33926MotorShield md;
 #define FLOAT_TIME 100
 
 // M1 is connected to both motors for the shoulder
-#define SHOULDER_TURN_SPEED 180
+#define SHOULDER_TURN_SPEED 140
 // M2 is connected to the motor for the gun stalk (or will be, some day, maybe)
 #define GUN_SPEED 90
 
