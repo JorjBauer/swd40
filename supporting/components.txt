@@ -1,10 +1,9 @@
 A1
   Moteino with RFM69 and onboard flash
   Code: arduino_dalek_sender.ino
-  runs from +12v
+  runs from +5v
   Purpose: primary controller. Listens on RF; drives primary motor controllers;
     delegates commands to other arduinos over serial.
-
 
 A2
   Arduino Uno clone
@@ -15,17 +14,17 @@ A2
     motors and the gun aim motor.
 
 A3
-  Arduino Uno
-  Code: arduino_dalek_wav.ino
-  runs from +12v
-  Daughterboards: Adafruit WAV shield
-  Purpose: primary audio engine; also runs the mist generator, fan to blow 
-    it, and LEDs
-
+  Teensy 3.1
+  Code: arduino_dalek_ringmod.ino
+  runs from +5v output from A2
+  Daughterboards: Teensy Audio Adapter Board 
+                  https://www.pjrc.com/store/teensy3_audio.html
+  Purpose: primary audio engine.
 
 Not listed:
 
 remote control ("sender")
   Wii controller version of the sender
   based on a Moteino with RFM69 (HW)
-  110mah lithium-ion battery
+  400mah lithium-ion battery
+  SparkFun PowerCell (to charge the battery and provide +5v)
