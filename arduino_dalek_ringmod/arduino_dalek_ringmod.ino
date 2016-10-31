@@ -16,25 +16,29 @@
 #include <SD.h>
 #include <SerialFlash.h>
 
-
 // GUItool: begin automatically generated code
 AudioInputI2S            i2s1;           //xy=67.4444465637207,220.77777481079102
+AudioSynthWaveform       waveform1;      //xy=82.33333206176758,78.22222137451172
 AudioPlaySdWav           playSdWav1;     //xy=130,315
-AudioSynthWaveform       waveform1;      //xy=149,116
-AudioEffectBitcrusher    bitcrusher1;    //xy=245.65656280517578,216.76769256591797
-AudioEffectMultiply      multiply1;      //xy=406,183
+AudioEffectBitcrusher    bitcrusher1;    //xy=206.7676887512207,224.5454797744751
+AudioEffectMultiply      multiply1;      //xy=344.8888702392578,84.11111259460449
+AudioFilterStateVariable filter1;        //xy=433.4343605041504,198.98989486694336
 AudioMixer4              mixer1;         //xy=590,244
 AudioOutputI2S           i2s2;           //xy=938,273
 AudioConnection          patchCord1(i2s1, 1, bitcrusher1, 0);
-AudioConnection          patchCord2(playSdWav1, 0, mixer1, 2);
-AudioConnection          patchCord3(playSdWav1, 1, mixer1, 3);
-AudioConnection          patchCord4(waveform1, 0, multiply1, 0);
+AudioConnection          patchCord2(waveform1, 0, multiply1, 0);
+AudioConnection          patchCord3(playSdWav1, 0, mixer1, 2);
+AudioConnection          patchCord4(playSdWav1, 1, mixer1, 3);
 AudioConnection          patchCord5(bitcrusher1, 0, multiply1, 1);
-AudioConnection          patchCord6(multiply1, 0, mixer1, 0);
-AudioConnection          patchCord7(mixer1, 0, i2s2, 0);
-AudioConnection          patchCord8(mixer1, 0, i2s2, 1);
+AudioConnection          patchCord6(multiply1, 0, filter1, 0);
+AudioConnection          patchCord7(multiply1, 0, filter1, 1);
+AudioConnection          patchCord8(filter1, 0, mixer1, 0);
+AudioConnection          patchCord9(filter1, 1, mixer1, 1);
+AudioConnection          patchCord10(mixer1, 0, i2s2, 0);
+AudioConnection          patchCord11(mixer1, 0, i2s2, 1);
 AudioControlSGTL5000     sgtl5000_1;     //xy=478,463
 // GUItool: end automatically generated code
+
 
 
 // Number of files.
@@ -73,7 +77,8 @@ void setup() {
   waveform1.amplitude(1.0);
   waveform1.frequency(32.25);
 
-  bitcrusher1.bits(8);
+  bitcrusher1.bits(12);
+  filter1.frequency(1800); // This defaults to 1000 Hz. We use the low-pass filter output (output 0 of the filter).
 
   SPI.setMOSI(7);
   SPI.setSCK(14);
@@ -107,9 +112,9 @@ void playFile(const char *filename)
 
 void playByIndex(int i)
 {
-  mixer1.gain(0, 0.0); // enable live voice input
-  mixer1.gain(2, 0.5); // disable the wav file channels
-  mixer1.gain(3, 0.5);
+  mixer1.gain(0, 0.0);
+  mixer1.gain(2, 0.2);
+  mixer1.gain(3, 0.2);
   
   if (i >= 0 && i < FILE_COUNT) {
     playFile(fileNames[i]);
@@ -118,7 +123,7 @@ void playByIndex(int i)
 
 void playLiveInput()
 {
-  mixer1.gain(0, 1.0); // enable live voice input
+  mixer1.gain(0, 2.0); // enable live voice input
   mixer1.gain(2, 0.0); // disable the wav file channels
   mixer1.gain(3, 0.0);
 }
