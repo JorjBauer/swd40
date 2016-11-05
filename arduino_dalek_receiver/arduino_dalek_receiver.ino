@@ -27,6 +27,9 @@
 #define SSERRX 9 // Not used; doubled up with onboard LED
 #define SSERTX A0
 
+#define VPIN A7
+#define VCUTOFF 780
+
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 SoftwareSerial softSerial(SSERRX, SSERTX);
@@ -93,6 +96,7 @@ unsigned long ledTimer = 0;
 
 int led_brightness = 255;
 int led_direction = -5;
+bool blinkingLight = false;
 
 bool brakeIsOn = false;
 
@@ -123,7 +127,7 @@ bool decelRight = false;
 #define MAXFASTRIGHTMOTOR 1300
 
 // FIXME: make left/right
-#define MAXTURNSPEED 1020
+#define MAXTURNSPEED 1050
 
 #define ACCEL 1
 #define STOPPEDACCEL 40 // necessary to give the controllers time between fwd and rev
@@ -236,6 +240,8 @@ void setup()
   digitalWrite(Motor1BrakePin, HIGH);
   pinMode(Motor2BrakePin, INPUT);
   digitalWrite(Motor2BrakePin, HIGH);
+
+  pinMode(VPIN, INPUT); // voltage input: 82k/10k voltage divider from the battery
   
   Serial.begin(9600); // Primarily for talking to the music board
 #ifdef DEBUG
@@ -424,9 +430,15 @@ void loop()
     setBrake(false); // turn off the brake
   }
 
-  /* Blinky Blinky little light */
-#if 0
-if (millis() >= ledTimer) {
+  /* Blinky Blinky little light? */
+  if (analogRead(VPIN) <= VCUTOFF) {
+    blinkingLight = true;
+  } else {
+    blinkingLight = false;
+    analogWrite(LED_PIN, 128); // This isn't an LED; it's a 5v lamp. 127 is off. 128 is on.
+  }
+
+  if (blinkingLight && millis() >= ledTimer) {
     led_brightness += led_direction;
     if (led_brightness <= 0 || led_brightness >= 255) {
       if (led_brightness < 0)
@@ -437,9 +449,9 @@ if (millis() >= ledTimer) {
       led_direction = -led_direction;
     }
     analogWrite(LED_PIN, led_brightness);
-    ledTimer = millis() + 50; // FIXME: pulse faster/slower depending on voltage
+    ledTimer = millis() + 50; // FIXME: pulse faster/slower depending on voltage, maybe?
   }  
-#endif
+
   /* See if we have new RF commands waiting to be received - make sure timer doesn't go off while we do */
 
   if (radio.receiveDone()) {
