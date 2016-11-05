@@ -138,16 +138,16 @@ int trans(int in)
 {
   // The base 2/3 should be half of the output                                  
   if (in <= 66) {
-    return map(in, 0, 66, 0, 50);
+    return map(in, 0, 66, 0, 40);
   }
 
   // 2/3 of what remains should be the next 80%                                 
   if (in <= 88) {
-    return map(in, 66, 88, 50, 90);
+    return map(in, 66, 88, 40, 80);
   }
 
   // And the remainder                                                          
-  return map(in, 88, 100, 90, 100);
+  return map(in, 88, 100, 80, 100);
 }
 
 void SendNewState(char motor, int state)
@@ -179,9 +179,10 @@ void SendNewState(char motor, int state)
   rf_send(motor);
 }
 
-// Given an angle (degrees, where 0 is straight forward?) and an acceleration
-// (range 0..100; the distance of the polar coordinate, basically) return
-// an optimal l_motor and r_motor (range -100..100) speed to achieve that goal
+// Given an angle (degrees, where 0 is right, 90 is fwd, -90 is back,           
+// 180 is left) and an acceleration (range 0..100; the distance of the          
+// polar coordinate, basically) return an optimal l_motor and r_motor           
+// (range -100..100) speed to achieve that goal                                 
 void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
 {
   /*
@@ -207,15 +208,19 @@ void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
   /* The above might be more correct, but this is more legible: */
 
   if (degs >= 0 && degs <= 90) {
+    // between full right (0) and forward (90)                                  
     *l_motor = accel;
     *r_motor = accel * sin(radians(2*degs - 90));
   } else if (degs < 0 && degs >= -90) {
+    // between full right (0) and backward (-90)                                
     *r_motor = -accel;
     *l_motor = accel * sin(radians(2*degs + 90));
   } else if (degs > 90 && degs <= 180) {
+    // between full forward (90) and full left (180)                            
     *r_motor = accel;
     *l_motor = accel * sin(radians(2*degs - 90));
   } else if (degs < -90 && degs >= -180) {
+    // between full backward (-90) and full left (-180)                         
     *l_motor = -accel;
     *r_motor = accel * sin(radians(2*degs + 90));
   }
