@@ -57,30 +57,14 @@ SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 WiiClassic ctrl = WiiClassic();
 int lcx, lcy, rcx, rcy;
 // How wide is each half of the left joystick's "center/NULL" range?
-#define LEFT_CENTER_RANGE 10
+#define LEFT_CENTER_RANGE 8
 // Same with the right joystick (which has a different precision)
-#define RIGHT_CENTER_RANGE 5
+#define RIGHT_CENTER_RANGE 4
 
 #define kFORWARD 0
 #define kBACKWARD 1
 
 #define DEBUG
-
-int slow_mode = 1; // Slow or fast mode? Slow by default.
-
-/* Protocol states initialized to invalid values */
-int fb_state = -1;  // forward/backward state; 0/1
-int p_state = -1;   // motor percentage; 0 to 10
-
-/* Remote motor states (should they be pulsed right now). Again, init'd to invalid values. */
-int lm_state = 0; // -10 to +10
-int rm_state = 0; // -10 to +10
-
-/* Vars to slowly ramp motors up/down */
-unsigned long last_motor_update_time = 0;
-unsigned char last_motor_counter = 0;
-int target_lm_state = 0;
-int target_rm_state = 0;
 
 unsigned long last_data_update = 0;
 
@@ -88,6 +72,9 @@ unsigned long last_data_update = 0;
 int led_brightness = 255;
 int led_direction = -5;
 unsigned long led_timer = 0;
+
+/* Movement state - used to tell whether or not to keep sending data */
+bool wasMoving = false;
 
 void setup() {
 #ifdef DEBUG
@@ -136,177 +123,95 @@ void setup() {
 // the lower end                                                                
 int trans(int in)
 {
-  // The base 2/3 should be half of the output                                  
+  // The base 2/3 should be 20% of the output
   if (in <= 66) {
-    return map(in, 0, 66, 0, 40);
+    return map(in, 0, 66, 0, 20);
   }
 
-  // 2/3 of what remains should be the next 80%                                 
-  if (in <= 88) {
-    return map(in, 66, 88, 40, 80);
+  // up to 90% of the range is 20% - 80% of the output range
+  if (in <= 90) {
+    return map(in, 66, 90, 20, 80);
   }
 
   // And the remainder                                                          
-  return map(in, 88, 100, 80, 100);
-}
-
-void SendNewState(char motor, int state)
-{
-  int fb_want;
-
-  /* Set the remote end cache for f/b and percent */
-  if (state >= 0) {
-    fb_want = kFORWARD;
-  } else {
-    fb_want = kBACKWARD;
-  }
-
-  int pct_want = abs(state);
-  if (pct_want > 10) {
-    pct_want = 10;
-  }
-
-  if (fb_want != fb_state) {
-    rf_send(fb_want == kFORWARD ? 'F' : 'B');
-    fb_state = fb_want;
-  }
-  if (pct_want != p_state) {
-    rf_send('0' + pct_want);
-    p_state = pct_want;
-  }
-
-  /* Set the appropriate motor to those settings */
-  rf_send(motor);
-}
-
-// Given an angle (degrees, where 0 is right, 90 is fwd, -90 is back,           
-// 180 is left) and an acceleration (range 0..100; the distance of the          
-// polar coordinate, basically) return an optimal l_motor and r_motor           
-// (range -100..100) speed to achieve that goal                                 
-void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
-{
-  /*
-  degs = ((degs + 180) % 360) - 180; // Normalize to [-180, 180)
-  accel = min(max(0, accel), 100);         // Normalize to [0, 100]
-  int v_a = accel * (45 - degs % 90) / 45;
-  int v_b = min(100, 2 * r + v_a, 2 * r - v_a);
-  if (degs < -90) {
-  *l_motor = -v_b;
-  *r_motor = -v_a;
-  } else if (degs < 0) {
-  *l_motor = -v_a;
-  *r_motor = v_b;
-  } else if (degs < 90) {
-  *l_motor = v_b;
-  *r_motor = v_a;
-  } else {
-  *l_motor = v_a;
-  *r_motor = -v_b;
-  }
-  */
-
-  /* The above might be more correct, but this is more legible: */
-
-  if (degs >= 0 && degs <= 90) {
-    // between full right (0) and forward (90)                                  
-    *l_motor = accel;
-    *r_motor = accel * sin(radians(2*degs - 90));
-  } else if (degs < 0 && degs >= -90) {
-    // between full right (0) and backward (-90)                                
-    *r_motor = -accel;
-    *l_motor = accel * sin(radians(2*degs + 90));
-  } else if (degs > 90 && degs <= 180) {
-    // between full forward (90) and full left (180)                            
-    *r_motor = accel;
-    *l_motor = accel * sin(radians(2*degs - 90));
-  } else if (degs < -90 && degs >= -180) {
-    // between full backward (-90) and full left (-180)                         
-    *l_motor = -accel;
-    *r_motor = accel * sin(radians(2*degs + 90));
-  }
-
-  /* Make sure to cap the motors at their peak values... */
-  if (*l_motor > 100)
-    *l_motor = 100;
-  if (*l_motor < -100)
-    *l_motor = -100;
-  if (*r_motor > 100)
-    *r_motor = 100;
-  if (*r_motor < -100)
-    *r_motor = -100;
+  return map(in, 90, 100, 80, 100);
 }
 
 int HandleSlowFastMode()
 {
   if (ctrl.selectPressed()) { // "select" is also "-"
-    slow_mode = 1;
-    return 0; // nothing sent
+    rf_send('-');
+    return 1;
   } else if (ctrl.startPressed()) { // "start" is also "+"
-    slow_mode = 0;
-    return 0; // we still didn't send anything to the remote end.
+    rf_send('+');
+    return 1;
   }
-
   return 0; // nothing sent to remote end.
 }
 
-uint8_t ReadRightJoystick(float *x, float *y)
+// return x/y values that are floats [-100..100]
+uint8_t ReadLeftJoystick(float *x, float *y)
 {
-  int lrAnalog = ctrl.rightStickX();
-  int udAnalog = ctrl.rightStickY();
+  int lrAnalog = ctrl.leftStickX();
+  int udAnalog = ctrl.leftStickY();
 
   *x = *y = 0;
 
-  // This is the right joystick, so its range is [0,31]. We have a center 
+  // This is the left joystick, so its range is [0,63]. We have a center 
   // position that we cached on startup, which is [rcx, rcy] and we know 
-  // the range of the "dead" middle spot we want, which is RIGHT_CENTER_RANGE.
+  // the range of the "dead" middle spot we want, which is LEFT_CENTER_RANGE.
   //
   // Turn all of this in to a percentage of left (negative) or right (positive)
   // and up (positive) or down (negative), from -1.0 to 1.0.
 
   // If the joystick is dead center, then it's nothing.
-  if (lrAnalog >= (rcx - RIGHT_CENTER_RANGE) &&
-      lrAnalog <= (rcx + RIGHT_CENTER_RANGE) &&
-      udAnalog >= (rcy - RIGHT_CENTER_RANGE) &&
-      udAnalog <= (rcy + RIGHT_CENTER_RANGE)) {
+  if (lrAnalog >= (lcx - LEFT_CENTER_RANGE) &&
+      lrAnalog <= (lcx + LEFT_CENTER_RANGE) &&
+      udAnalog >= (lcy - LEFT_CENTER_RANGE) &&
+      udAnalog <= (lcy + LEFT_CENTER_RANGE)) {
     // Dead center; do nothing.
     return 0;
   }
 
-  if (lrAnalog < rcx - RIGHT_CENTER_RANGE) {
+  if (lrAnalog < lcx - LEFT_CENTER_RANGE) {
     // Left-leaning
-    float range = (rcx - RIGHT_CENTER_RANGE);
+    float range = (lcx - LEFT_CENTER_RANGE);
     *x = -(1.0 - ((float)lrAnalog / range));
-  } else if (lrAnalog > rcx + RIGHT_CENTER_RANGE) {
+  } else if (lrAnalog > lcx + LEFT_CENTER_RANGE) {
     // Right-leaning
-    float range = 31.0 - (rcx + RIGHT_CENTER_RANGE);
-    *x = (((float)lrAnalog - ((float)rcx + (float)RIGHT_CENTER_RANGE) ) / range);
+    float range = 63.0 - (lcx + LEFT_CENTER_RANGE);
+    *x = (((float)lrAnalog - ((float)lcx + (float)LEFT_CENTER_RANGE) ) / range);
   }
 
-  if (udAnalog < rcy - RIGHT_CENTER_RANGE) {
+  if (udAnalog < lcy - LEFT_CENTER_RANGE) {
     // down-leaning
-    float range = (rcy - RIGHT_CENTER_RANGE);
+    float range = (lcy - LEFT_CENTER_RANGE);
     *y =  -(1.0 - ((float)udAnalog / range));
  
-  } else if (udAnalog > rcy + RIGHT_CENTER_RANGE) {
-    float range = 31.0 - (rcy + RIGHT_CENTER_RANGE);
-    *y = (float)(udAnalog - rcy - RIGHT_CENTER_RANGE) / range;
+  } else if (udAnalog > lcy + LEFT_CENTER_RANGE) {
+    float range = 63.0 - (lcy + LEFT_CENTER_RANGE);
+    *y = (float)(udAnalog - lcy - LEFT_CENTER_RANGE) / range;
   }
 
   // Translate: make the center region of the joystick "bigger" and the outer ring "smaller" so that it's easier to go slowly
-  int tmp = (int)abs(((float)(*x) * (float)100.0));
-  tmp = trans(tmp);
+  // The right joystick gives us basically 21..31 for +, and 11..0 for - values. That's not much of a range. :/
+  // The left joystick gives us 41..63 for +, and 0..22 for - (although backward is pretty bad b/c of a mechanical problem in my build).
+  // This is why the left joystick is now driving instead of the right.
+  int tmp = (int)abs(((float)(*x) * (float)100.0)); // make it 0..100
+  tmp = trans(tmp); // perform non-linear adaptation
+  // preserve original sign
   if (*x > 0) {
-    *x = (float)tmp / (float)100.0;
+    *x = (float)tmp;
   } else {
-    *x = -(float)tmp / (float)100.0;
+    *x = -(float)tmp;
   }
   
   tmp = (int)abs(((float)(*y) * (float)100.0));
   tmp = trans(tmp);
-  if (*y > 0) {
-    *y = (float)tmp / (float)100.0;
+  if (*y >= 0) {
+    *y = (float)tmp;
   } else {
-    *y = -(float)tmp / (float)100.0;
+    *y = -(float)tmp;
   }
 
   return 1;
@@ -315,30 +220,19 @@ uint8_t ReadRightJoystick(float *x, float *y)
 int HandleMovement()
 {
   float x, y;
-  ReadRightJoystick(&x, &y);
+  ReadLeftJoystick(&x, &y);
 
-  // Turn x and y in to polar coordinates
-  float distance = sqrt(x*x + y*y) * 100.0;
-  float angle = degrees(atan2(y, x));
-
-  int new_leftmotor;
-  int new_rightmotor;
-
-  OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
-
-  if (new_leftmotor == 0 && new_rightmotor == 0) {
-    target_lm_state = target_rm_state = 0;
-    return 0;
+  // If we are moving now (x or y are not zero), or if we *were* moving 
+  // the last time we were called, then send an update.
+  if (wasMoving || x != 0 || y != 0) {
+    char gobuf[3] = { 'G', (char)x, (char)y };
+    rf_send(gobuf, 3);
   }
 
-  // Compare the new states with the last states. If they differ, then
-  // send the new states to the other end.
-  int new_lm_state = new_leftmotor / 10;
-  int new_rm_state = new_rightmotor / 10;
-  
-  target_lm_state = new_lm_state;
-  target_rm_state = new_rm_state;
-  
+  // Then note whether or not we were moving this time so we know what to 
+  // do next time.
+  wasMoving = (x != 0 || y != 0);
+
   return 1;
 }
 
@@ -349,19 +243,19 @@ int HandleShoulder()
     return 1;
   }
 
-  if (ctrl.leftStickX() < (lcx - LEFT_CENTER_RANGE)) {
+  if (ctrl.rightStickX() < (lcx - RIGHT_CENTER_RANGE)) {
     rf_send(')');
     return 1;
-  } else if (ctrl.leftStickX() > (lcx + LEFT_CENTER_RANGE)) {
+  } else if (ctrl.rightStickX() > (lcx + RIGHT_CENTER_RANGE)) {
     rf_send('(');
     return 1;
   }
 
   /* FIXME: validate that these are in the correct order */
-  if (ctrl.leftStickY() < (lcy - LEFT_CENTER_RANGE)) {
+  if (ctrl.rightStickY() < (lcy - RIGHT_CENTER_RANGE)) {
     rf_send('v');
     return 1;
-  } else if (ctrl.leftStickY() > (lcy + LEFT_CENTER_RANGE)) {
+  } else if (ctrl.rightStickY() > (lcy + RIGHT_CENTER_RANGE)) {
     rf_send('^');
     return 1;
   }
@@ -379,17 +273,13 @@ int HandleSounds()
     rf_send("M4", 2);
     ret = 1;
   } else if (ctrl.leftShoulderPressed() || ctrl.leftShouldPressure()) {
-    // firing noise
+    // brakes
     rf_send("m", 1);
-    target_lm_state = target_rm_state = 0;
-    lm_state = rm_state = 1;
     ret = 1;
   } else if (ctrl.rightShoulderPressed() || ctrl.rightShouldPressure()) {
-    // "Exterminate!"
+    // brakes
     rf_send("m", 1);
-    target_lm_state = target_rm_state = 0;
-    lm_state = rm_state = 1;
-//    rf_send("M5", 2);
+    ret = 1;
     ret = 1;
   } else if (ctrl.leftDPressed()) {
     rf_send("M6", 2);
@@ -446,53 +336,9 @@ void loop() {
     CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
   }
   
-  // Handle motor ramp up/down
-  if (millis() >= last_motor_update_time + 40) {
-    
-    // Once every 40ms, move 10% toward our goal speeds for both motors
-    
-    if (lm_state != target_lm_state) {
-      int new_lm_state = lm_state;
-      if (target_lm_state > lm_state) {
-        new_lm_state ++;
-      } else {
-        new_lm_state --;
-      }
-      SendNewState('L', new_lm_state);
-      lm_state = new_lm_state;
-    }
-    if (rm_state != target_rm_state) {
-      int new_rm_state = rm_state;
-      if (target_rm_state > rm_state) {
-        new_rm_state ++;
-      } else {
-        new_rm_state --;
-      }
-      SendNewState('R', new_rm_state);
-      rm_state = new_rm_state;
-    }
-
-    // Once every 80ms, if either motor should be moving, pulse the drives
-    last_motor_counter++;
-    if ((last_motor_counter & 1) == 1) {
-      if (lm_state || rm_state) {
-        // Since there's no communication back from the Dalek about whether it's in fast or slow mode, 
-        // and we're flashing the LED differently for both, and I want that to always be true:
-        // we'll always send the slow/fast deliniator with the 'G' to pulse the motors. Not as 
-        // efficient as I'd like, but it should prove reliable.
-        static char gobuf[2] = { '-', 'G'};
-        gobuf[0] = slow_mode ? '-' : '+';
-        rf_send(gobuf, 2);
-      }
-    }
-    
-    last_motor_update_time = millis();
-  }
-
-
   // Handle LED pulsing
   if (millis() >= led_timer) {
-    led_brightness += led_direction * (1 + (1 - slow_mode)); // pulse faster in fast mode
+    led_brightness += led_direction * (1 /*+ (1 - slow_mode)*/); // pulse faster in fast mode
     if (led_brightness <= 0 || led_brightness >= 255) {
       if (led_brightness < 0)
 	led_brightness = 0;
@@ -506,7 +352,7 @@ void loop() {
   }
 
   // Periodically update the data
-  if (millis() >= last_data_update + 100) {
+  if (millis() >= last_data_update + 80) {
     // Read new values from the controller
     ctrl.update();
   

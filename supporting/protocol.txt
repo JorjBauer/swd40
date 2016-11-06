@@ -1,4 +1,4 @@
-Protocol v1.2, 10/17/2016.
+Protocol v1.3, 11/5/2016.
 
 This protocol had a few design goals:
 
@@ -36,13 +36,7 @@ before it has to send another 'G' to get it going in the new
 direction.
 
 
-F: next command(s) will be forward
-B: next command(s) will be backward
-0-9: next command(s) will be 0-90%
-:: (colon) next command(s) will be 100% (colon is the ascii character after 9)
-L: set Left motor settings based on current settings
-R: set Right motor settings based on current settings
-G: Go, 1 pulse, based on current settings of both L and R motors
+G##: Go; joystick is at (x,y) as defined by the two (signed) bytes (-100..100)
    The drive system will carry this pulse forward for 200mS. As long as a 
    stream of 'G' pulses comes in faster than one every 200mS, the motors will 
    run continuously.
@@ -56,8 +50,7 @@ G: Go, 1 pulse, based on current settings of both L and R motors
 v: move gun down one pulse
 
 m: hard-stop motors (Brake) and stop all sound that might be playing
-   (Brake will stay on for 200mS, just like 'G' pulses - if we figure
-   out the brakes.)
+   (Brake will stay on for 200mS, just like 'G' pulses.)
 
 M#: play a sound with the given # (0-9)
     0: x button

@@ -1,5 +1,6 @@
 A1
   Moteino with RFM69 and onboard flash
+      requires https://lowpowerlab.com/guide/moteino-programming/arduinoide/
   Code: arduino_dalek_sender.ino
   runs from +5v
   Purpose: primary controller. Listens on RF; drives primary motor controllers;
@@ -7,6 +8,7 @@ A1
 
 A2
   Arduino Uno clone
+      requires https://github.com/pololu/dual-mc33926-motor-shield
   Code: arduino_dalek_shouldermotor.ino
   runs from +12v
   Daughterboards: Pololu motor shield
@@ -14,7 +16,8 @@ A2
     motors and the gun aim motor.
 
 A3
-  Teensy 3.1
+  Teensy 3.1 (72MHz, optimize speed, USB type Serial)
+      requires http://www.pjrc.com/teensy/td_download.html
   Code: arduino_dalek_ringmod.ino
   runs from +5v output from A2
   Daughterboards: Teensy Audio Adapter Board 
