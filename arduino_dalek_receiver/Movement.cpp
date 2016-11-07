@@ -22,10 +22,13 @@
 #define MINMOTOR 1000
 #define MAXMOTOR 1150 // or 1300 for fast?
 #define MAXTURN 1050
+#define MAXSAFETY 1300 // don't ever allow values over this
 
 #define ACCEL 1
 #define DECEL 150
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
+
+#define STOPPED_THRESHOLD 5 // how many cycles to remain @ 0 before moving
 
 #ifdef _UNIX
 long map(long x, long in_min, long in_max, long out_min, long out_max)
@@ -90,7 +93,7 @@ static void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
 // Given an X/Y from a joystick [-100..100] where 
 //  y==+100 is forward and y==-100 is back; and
 //  x==+100 is right and x==-100 is left
-// figure out how to make that best move the motors
+// figure out how to make that best move the motors.
 void Movement::JoystickTarget(float x, float y)
 {
   // Turn x and y in to polar coordinates
@@ -102,14 +105,20 @@ void Movement::JoystickTarget(float x, float y)
 
   OptimalThrust(angle, distance, &new_leftmotor, &new_rightmotor);
 
-  target_l = new_leftmotor;
-  target_r = new_rightmotor;
+  target_l_pct = new_leftmotor;
+  target_r_pct = new_rightmotor;
 }
 
 void Movement::GetMotorTargetPercentages(int8_t *left, int8_t *right)
 {
-  *left = target_l;
-  *right = target_r;
+  *left = target_l_pct;
+  *right = target_r_pct;
+}
+
+void Movement::GetMotorTargetValues(int16_t *left, int16_t *right)
+{
+  *left = percentToMotorDriverValue(target_l_pct, target_l_pct != target_r_pct);
+  *right = percentToMotorDriverValue(target_r_pct, target_l_pct != target_r_pct);
 }
 
 void Movement::GetMotorValues(int16_t *left, int16_t *right)
@@ -131,6 +140,17 @@ void Movement::GetMotorDirection(int8_t *left, int8_t *right)
   *right = sign(actual_r);
 }
 
+// Get the percentage of each motor's current state as a ratio of (L/R).
+// (Return NAN if R is zero.)
+float Movement::GetMotorRatio()
+{
+  if (abs(actual_r) <= MINMOTOR)
+    return NAN;
+
+  return ( (float)(actual_l - MINMOTOR) / (float) (actual_r - MINMOTOR) );
+}
+
+
 void Movement::Brake(bool set)
 {
   brakeEnabled = set;
@@ -145,7 +165,7 @@ void Movement::GetBrakeState(bool *left, bool *right)
 
 void Movement::Reset()
 {
-  target_l = target_r = 0;
+  target_l_pct = target_r_pct = 0;
   actual_l = actual_r = 0;
   brakeEnabled = false;
   decelLeft = decelRight = false;
@@ -160,135 +180,109 @@ void Movement::Update()
     return;
   }
 
-  // Perform acceleration and deceleration. When doing this, we want to 
-  // make sure that the relative L/R ratio is in line with what we're 
-  // trying to achieve.
+  bool canMoveL = true;
+  bool canMoveR = true;
+  // Motors must stop @ 0 for a given amount of time before moving again.
+  if (actual_l == 0) {
+    if (++stopped_l_time < STOPPED_THRESHOLD)
+      canMoveL = false;
+  } else {
+    stopped_l_time = 0;
+  }
 
-  int16_t l = actual_l;
-  int16_t r = actual_r;
-
-  float actualRatio = 0;
-  if (target_r) actualRatio = (float)target_l / (float)target_r;
-  float foundRatio = 0;
-  if (r) foundRatio = (float)l / (float)r;
+  if (actual_r == 0) {
+    if (++stopped_r_time  < STOPPED_THRESHOLD)
+      canMoveR = false;
+  } else {
+    stopped_r_time = 0;
+  }
 
   // If we are turning - the motors don't match target values - then 
   // our max is slower, for reasons of control.
   int16_t maxSpeed = MAXMOTOR;
-  if (target_l != target_r) {
+  bool isTurning = false;
+  if (target_l_pct != target_r_pct) {
     maxSpeed = MAXTURN;
+    isTurning = true;
   }
 
-  // If either of the motors is moving, but needs to be moving the other way,
-  // then we'll head back to stopped.
-#if 0
-  if ((target_r > 0 && r < 0) ||
-      (target_r < 0 && r > 0) ||
-      (target_l > 0 && l < 0) ||
-      (target_l < 0 && l > 0)) {
-    l = performAccelerationWithConstraints(l, 
-					   0,
-					   MINMOTOR,
-					   maxSpeed,
-					   &decelLeft);
-    
-    r = performAccelerationWithConstraints(r, 
-					   0,
-					   MINMOTOR,
-					   maxSpeed,
-					   &decelRight);
-  }
+  // prepare new actual L/R values...
+  int16_t l = actual_l;
+  int16_t r = actual_r;
 
-  // Try to keep the motors moving more or less at the same ratio that
-  // they need to move in the right direction.
-  
+  // From the current motor states, determine how to best accelerate
+  // to match the desired course. The default is 1/1 (which will be
+  // re-attained when the ratio matches in Update()).
+
+  int16_t lt = percentToMotorDriverValue(target_l_pct, isTurning);
+  int16_t rt = percentToMotorDriverValue(target_r_pct, isTurning);
+  float oldRatio = GetMotorRatio();
+  float newRatio;
+  if (target_r_pct == 0) 
+    newRatio = NAN;
   else
-#endif
- if (foundRatio == 0 ||
-      fabsf(actualRatio-foundRatio) <= 0.2 ||
-	   (target_l == target_r && target_l == 0)) {
+    newRatio = target_l_pct / target_r_pct;
 
-    // If we're not moving at the moment, or if the ratio is close to correct,
-    // then just accelerate normally
+  // By default, assume we're going to accelerate at some preset speed...
+  int8_t accelLeft = ACCEL;
+  int8_t accelRight = ACCEL;
 
-    l = performAccelerationWithConstraints(l, 
-					   percentToMotorDriverValue(target_l),
-					   MINMOTOR,
-					   maxSpeed,
-					   &decelLeft);
+  int16_t leftCorrection = MotorDifferenceMagnitude(actual_l, lt);
+  int16_t rightCorrection = MotorDifferenceMagnitude(actual_r, rt);
+
+  // FIXME: handle all the NAN cases in oldRatio != newRatio.
+  // ... hmm, or just use this?
+  if (leftCorrection != rightCorrection) {
+    // ... and if we're trying to move the motors at a different set of 
+    // relative speeds, then figure out which motor needs to move faster to 
+    // catch up, and do it
     
-    r = performAccelerationWithConstraints(r, 
-					   percentToMotorDriverValue(target_r),
+    if (rightCorrection > leftCorrection)
+      accelRight = 3 * ACCEL;
+    else
+      accelLeft = 3 * ACCEL;
+  }
+
+  if (canMoveL) {
+    l = performAccelerationWithConstraints(l, 
+					   lt,
 					   MINMOTOR,
 					   maxSpeed,
+					   accelLeft,
+					   &decelLeft);
+  }
+
+  if (canMoveR) {
+    r = performAccelerationWithConstraints(r, 
+					   rt,
+					   MINMOTOR,
+					   maxSpeed,
+					   accelRight,
 					   &decelRight);
   }
 
-  else {
-      // Always assume that we want to slow one of the motors down to 
-      // compensate, rather than speeding one up to compensate.
-
-      // Cases:
-      // 1. Moving forward; right motor is faster than we want
-      // 2. Moving forward; left motor is faster than we want
-      // 3. Turning left/forward; left motor is faster than we want
-      // 4. Turning right/forward; right motor is faster than we want
-      if (foundRatio > actualRatio && target_l >= 0 && target_r >= 0) {
-	float ideal_l = 0;
-	if (actualRatio != 0) ideal_l  = (float)r / actualRatio;
-	l -= DECEL;
-	decelLeft = true;
-	if (l <= ideal_l) l = ideal_l;
-      }
-      else if (foundRatio < actualRatio && target_l >= 0 && target_r >= 0) {
-	float ideal_r;
-	if (actualRatio != 0) ideal_r = (float)l / actualRatio;
-	r -= DECEL;
-	decelRight = true;
-	if (r <= ideal_r) r = ideal_r;
-      }
-
-      // 5. Turning pure left or pure right, and the other motor is drifting
-
-      // 6. Turning left/backward; left motor is faster than we want
-      // 7. Turning right/backward; right motor is faster than we want
-      // 8. Moving backward; right motor is faster than we want
-      // 9. Moving backward; left motor is faster than we want
-
-      else {
-	l = performAccelerationWithConstraints(l, 
-					       percentToMotorDriverValue(target_l),
-					       MINMOTOR,
-					       maxSpeed,
-					       &decelLeft);
-	
-	r = performAccelerationWithConstraints(r, 
-					       percentToMotorDriverValue(target_r),
-					       MINMOTOR,
-					       maxSpeed,
-					       &decelRight);
-	
-      }
-  }
-  
   // Set the new actual values
 
   actual_l = l;
   actual_r = r;
 }
 
-int16_t Movement::percentToMotorDriverValue(int8_t pct)
+int16_t Movement::percentToMotorDriverValue(int8_t pct, bool isTurning)
 {
   if (abs(pct) < 1)
     return 0;
 
-  int16_t ret = map(abs(pct), 1, 100, MINMOTOR, MAXMOTOR);
+  int16_t maxVal = MAXMOTOR;
+  if (isTurning)
+    maxVal = MAXTURN;
+
+  int16_t ret = map(abs(pct), 1, 100, MINMOTOR, maxVal);
 
   if (ret <= MINMOTOR)
     ret = MINMOTOR;
 
-  if (ret >= MAXMOTOR)
-    ret = MAXMOTOR;
+  if (ret >= maxVal)
+    ret = maxVal;
 
   if (pct < 0)
     ret = -ret;
@@ -300,10 +294,30 @@ int16_t Movement::performAccelerationWithConstraints(int16_t current,
 						     int16_t target,
 						     int16_t minVal,
 						     int16_t maxVal,
+						     int8_t accel,
 						     bool *isDecelOut)
 {
-  if (target > maxVal)
-    target = maxVal;
+  // Don't allow targets > MAXSAFETY. We do allow targets > maxVal,
+  // which may or may not be a troublesome bug. It's important that we
+  // allow current to be > maxVal -- we might have had a different
+  // maxVal and we've dropped it, in which case we'll be decelerating
+  // normally to attain it.
+
+  if (abs(target) > MAXSAFETY) {
+    target = (target > 0 ? MAXSAFETY : -MAXSAFETY);
+  }
+
+  // stopped, and stopping? Leave the brake engaged.
+  if (current == 0 && target == 0) {
+    *isDecelOut = true;
+    return 0;
+  }
+
+  // Reached our target? Brakes off, keep going...
+  if (target == current && target >= minVal && target <= maxVal) {
+    *isDecelOut = false;
+    return target;
+  }
 
   // accelerating: do it slowly...
   if (target >= 0 & current >= 0 && target > current) {
@@ -312,26 +326,26 @@ int16_t Movement::performAccelerationWithConstraints(int16_t current,
     // value required to actually make the motor move. We use that window 
     // as a buffer to give us some time for the motors to actually stop 
     // before reversing direction.
-    
     if (current < minVal)
-      current = max(current + 250 * ACCEL, minVal); // jump the gap *SLOWLY* so the motor controllers don't hate on us
+      current = minVal; // jump the gap
     else
-      current = min(current + ACCEL, target);
+      current = min(current + accel, target);
     *isDecelOut = false;
   } else if (target < 0 && current <= 0 && target < current) {
     // accelerating backward
     if (current > -minVal)
-      current = max(current - 250 * ACCEL, -minVal); // jump the gap *SLOWLY* going in to reverse.
+      current = -minVal; // jump the gap
     else
-      current = max(current - ACCEL, target);
+      current = max(current - accel, target);
     *isDecelOut = false;
   } else if (target < current) {
     // slowing down from "too fast forward"
     current = max(current-DECEL, target);
     // At some point we hit some minimum "close enough to zero" and we
     // just stop.
-    if (abs(current) <= MINBRAKEVAL)
+    if (abs(current) <= MINBRAKEVAL) {
       current = 0;
+    }
     *isDecelOut = true;
   } else if (target > current) {
     // slowing down from "too fast backward"
@@ -342,11 +356,31 @@ int16_t Movement::performAccelerationWithConstraints(int16_t current,
   }
 
   // Ensure constraints
-  if (abs(current) > maxVal) {
-    current = (current > 0 ? maxVal : -maxVal);
+  if (abs(current) > MAXSAFETY) {
+    current = (current > 0 ? MAXSAFETY : -MAXSAFETY);
+  }
+
+  if (abs(current) < minVal) {
+    current = 0;
   }
 
   return current;
 }
 
+int16_t Movement::MotorDifferenceMagnitude(int16_t a, int16_t b)
+{
+  // return the absolute difference between the two - skipping the dead zone.
+  if (a > 0 && a >= MINMOTOR) {
+    a -= MINMOTOR;
+  } else if (a < 0 && a <= -MINMOTOR) {
+    a += MINMOTOR;
+  }
+  if (b >= 0 && b >= MINMOTOR) {
+    b -= MINMOTOR;
+  } else if (b < 0 && b <= -MINMOTOR) {
+    b += MINMOTOR;
+  }
+
+  return abs(a-b);
+}
 

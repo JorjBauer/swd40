@@ -14,7 +14,7 @@ typedef struct _replayStep {
 } replayStep;
 
 #define REPLAYSTEPS 12
-replayStep replay[REPLAYSTEPS] = { {0,      0,      1, "stopped"},
+replayStep replay[REPLAYSTEPS] = { {0,      0,    100, "stopped"},
 				   {0,    100,    135, "drive forward"},
 				   {50,   100,     20, "bear right"},
 				   {0,    100,    130, "back to full forward"},
@@ -44,12 +44,20 @@ void delayMs(long millis)
     int8_t l, r;
     m.GetMotorTargetPercentages(&l, &r);
     float targetRatio = (float)l / (float)r;
-    printf("%ld Left target: %d%%; right: %d%% [%f]\n", millis, l, r, targetRatio);
+    printf("%ld Left target: %d%%; right: %d%% [%f] ", millis, l, r, targetRatio);
+    int16_t tl, tr;
+    m.GetMotorTargetValues(&tl, &tr);
+    printf("[%d / %d] ", tl, tr);
+
     int16_t cl, cr;
     m.GetMotorValues(&cl, &cr);
     bool bl, br;
     m.GetBrakeState(&bl, &br);
-    float actualRatio = (float)cl / (float)cr;
+    // The actual ratio is weird, because there's a min and max value. We want 
+    // the percentage of that, for each, compared as a ratio. Which is hard. 
+    // So it's encapsulated inside the Movement class, b/c it's not simply 
+    // (float) cl / (float) cr
+    float actualRatio = m.GetMotorRatio();
     printf("Left motor: %d%c; Right:%d%c [%f]\n", cl, bl?'*':' ', cr, br?'*':' ', actualRatio);
   }
 }
