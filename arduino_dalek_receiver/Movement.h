@@ -39,7 +39,6 @@ class Movement {
   int16_t percentToMotorDriverValue(int8_t pct, bool isTurning);
   int16_t performAccelerationWithConstraints(int16_t current,
 					     int16_t target,
-					     int16_t minVal,
 					     int16_t maxVal,
 					     int8_t accel,
 					     bool *isDecelOut);

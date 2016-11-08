@@ -3,29 +3,15 @@
 #include <stdlib.h>
 #include "Movement.h"
 
-/* FIXMEs:
- *   re-implement fast mode/slow mode
- *   per-motor min/max may or may not be necessary?
- *   turning & turn speeds
- *   disable reverse-motor-on-turn behavior
- *   
- * Probable errors to figure out:
- *   - If we start turning but then head full-forward, the motors 
- *     remain unbalanced until they hit full. This makes the turn 
- *     significant, where it shouldn't be happening at all.
- *     We should have some sense of "the target motors are equal percentages,
- *     so make the current motor values the same"
- *   - When going from stop to full-back, we don't accelerate - we just go 
- *     right to full back. BUG.
- */
-
-#define MINMOTOR 1000
-#define MAXMOTOR 1150 // or 1300 for fast?
+#define MINBACKMOTOR 930
+#define MINMOTOR 970
+#define MAXMOTOR 1300 // or 1300 for fast?
 #define MAXTURN 1050
 #define MAXSAFETY 1300 // don't ever allow values over this
 
-#define ACCEL 1
-#define DECEL 150
+#define ACCEL 5
+#define CATCHUP 3       // multiplier on top of ACCEL if one motor needs to catch the other
+#define DECEL 150       // estimated rate at which we decelerate with brakes on
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
 
 #define STOPPED_THRESHOLD 5 // how many cycles to remain @ 0 before moving
@@ -124,14 +110,16 @@ void Movement::GetMotorTargetValues(int16_t *left, int16_t *right)
 void Movement::GetMotorValues(int16_t *left, int16_t *right)
 {
   *left = actual_l;
-  if (abs(actual_l) <= MINMOTOR) {
+  if (actual_l >= 0 && actual_l <= MINMOTOR) {
     *left = 0;
   }
 
   *right = actual_r;
-  if (abs(actual_r) <= MINMOTOR) {
+  if (actual_r >= 0 && actual_r <= MINMOTOR) {
     *right = 0;
   }
+
+  // For reverse, return all the weird intermediate values...
 }
 
 void Movement::GetMotorDirection(int8_t *left, int8_t *right)
@@ -147,7 +135,10 @@ float Movement::GetMotorRatio()
   if (abs(actual_r) <= MINMOTOR)
     return NAN;
 
-  return ( (float)(actual_l - MINMOTOR) / (float) (actual_r - MINMOTOR) );
+  float a = abs(actual_l) - (actual_l < 0 ? MINBACKMOTOR : MINMOTOR);
+  float b = abs(actual_r) - (actual_r < 0 ? MINBACKMOTOR : MINMOTOR);
+
+  return a / b;
 }
 
 
@@ -184,15 +175,19 @@ void Movement::Update()
   bool canMoveR = true;
   // Motors must stop @ 0 for a given amount of time before moving again.
   if (actual_l == 0) {
-    if (++stopped_l_time < STOPPED_THRESHOLD)
+    if (++stopped_l_time < STOPPED_THRESHOLD) {
       canMoveL = false;
+      decelLeft = false; // brake has to be off...
+    }
   } else {
     stopped_l_time = 0;
   }
 
   if (actual_r == 0) {
-    if (++stopped_r_time  < STOPPED_THRESHOLD)
+    if (++stopped_r_time  < STOPPED_THRESHOLD) {
       canMoveR = false;
+      decelRight = false; // brake has to be off...
+    }
   } else {
     stopped_r_time = 0;
   }
@@ -238,15 +233,14 @@ void Movement::Update()
     // catch up, and do it
     
     if (rightCorrection > leftCorrection)
-      accelRight = 3 * ACCEL;
+      accelRight = CATCHUP * ACCEL;
     else
-      accelLeft = 3 * ACCEL;
+      accelLeft = CATCHUP * ACCEL;
   }
 
   if (canMoveL) {
     l = performAccelerationWithConstraints(l, 
 					   lt,
-					   MINMOTOR,
 					   maxSpeed,
 					   accelLeft,
 					   &decelLeft);
@@ -255,7 +249,6 @@ void Movement::Update()
   if (canMoveR) {
     r = performAccelerationWithConstraints(r, 
 					   rt,
-					   MINMOTOR,
 					   maxSpeed,
 					   accelRight,
 					   &decelRight);
@@ -278,8 +271,11 @@ int16_t Movement::percentToMotorDriverValue(int8_t pct, bool isTurning)
 
   int16_t ret = map(abs(pct), 1, 100, MINMOTOR, maxVal);
 
-  if (ret <= MINMOTOR)
+  if (ret >= 0 && ret <= MINMOTOR)
     ret = MINMOTOR;
+
+  if (ret < 0 && ret > -MINBACKMOTOR)
+    ret = MINBACKMOTOR; // sign changed below
 
   if (ret >= maxVal)
     ret = maxVal;
@@ -292,7 +288,6 @@ int16_t Movement::percentToMotorDriverValue(int8_t pct, bool isTurning)
 
 int16_t Movement::performAccelerationWithConstraints(int16_t current,
 						     int16_t target,
-						     int16_t minVal,
 						     int16_t maxVal,
 						     int8_t accel,
 						     bool *isDecelOut)
@@ -303,13 +298,20 @@ int16_t Movement::performAccelerationWithConstraints(int16_t current,
   // maxVal and we've dropped it, in which case we'll be decelerating
   // normally to attain it.
 
+  // min value depends on direction...
+  int16_t minVal = MINMOTOR;
+  if (current < 0 ||
+      (current == 0 && target < 0)) {
+    minVal = MINBACKMOTOR;
+  }
+
   if (abs(target) > MAXSAFETY) {
     target = (target > 0 ? MAXSAFETY : -MAXSAFETY);
   }
 
-  // stopped, and stopping? Leave the brake engaged.
+  // stopped, and stopping?
   if (current == 0 && target == 0) {
-    *isDecelOut = true;
+    *isDecelOut = false;
     return 0;
   }
 
@@ -333,8 +335,9 @@ int16_t Movement::performAccelerationWithConstraints(int16_t current,
     *isDecelOut = false;
   } else if (target < 0 && current <= 0 && target < current) {
     // accelerating backward
-    if (current > -minVal)
+    if (current > -minVal) {
       current = -minVal; // jump the gap
+    }
     else
       current = max(current - accel, target);
     *isDecelOut = false;

@@ -263,6 +263,7 @@ void updateMotors()
 #ifdef DEBUG
       Serial.println(" rev");
 #endif
+  
       pinMode(Motor1DirectionPin, OUTPUT);
       digitalWrite(Motor1DirectionPin, LOW); // drag to ground
     } else {
@@ -293,6 +294,7 @@ void updateMotors()
     Serial.print(" ll: ");
     Serial.println(lastLeftMotor);
 #endif
+
     MotorDAC.setValue(abs(lastLeftMotor), LEFTDAC);
   }
   if (current_right_motor != lastRightMotor) {
@@ -380,6 +382,7 @@ void loop()
     if (radio.DATALEN >= 4 && radio.DATA[0] == 'F' && radio.DATA[1] == 'L' && radio.DATA[2] == 'X' && radio.DATA[3] == '?') {
       // probably going to flash - shut down the timer and watchdog timer
       wdt_disable();
+      analogWrite(LED_PIN, 0); // turn off the LED; we're not working
     }
 
     CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
