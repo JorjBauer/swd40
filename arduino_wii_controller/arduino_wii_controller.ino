@@ -243,19 +243,19 @@ int HandleShoulder()
     return 1;
   }
 
-  if (ctrl.rightStickX() < (lcx - RIGHT_CENTER_RANGE)) {
+  if (ctrl.rightStickX() < (rcx - RIGHT_CENTER_RANGE)) {
     rf_send(')');
     return 1;
-  } else if (ctrl.rightStickX() > (lcx + RIGHT_CENTER_RANGE)) {
+  } else if (ctrl.rightStickX() > (rcx + RIGHT_CENTER_RANGE)) {
     rf_send('(');
     return 1;
   }
 
   /* FIXME: validate that these are in the correct order */
-  if (ctrl.rightStickY() < (lcy - RIGHT_CENTER_RANGE)) {
+  if (ctrl.rightStickY() < (rcy - RIGHT_CENTER_RANGE)) {
     rf_send('v');
     return 1;
-  } else if (ctrl.rightStickY() > (lcy + RIGHT_CENTER_RANGE)) {
+  } else if (ctrl.rightStickY() > (rcy + RIGHT_CENTER_RANGE)) {
     rf_send('^');
     return 1;
   }
