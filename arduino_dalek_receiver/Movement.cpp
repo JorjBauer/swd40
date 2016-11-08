@@ -3,13 +3,21 @@
 #include <stdlib.h>
 #include "Movement.h"
 
-#define MINBACKMOTOR 930
+// at 930, I can get it to back up, but not turn-in-place.
+// at 900, this works pretty well but is laggy getting in to reverse.
+// at 920 it turns-in-place. Still laggy, but probably the best we'll get.
+//   could try changing ACCEL, or have a separate forward/backward ACCEL to 
+//   get over the reverse "hump" faster, but I don't know that it would work.
+// Regardless: if we have appreciable backward speed and it tries to stop,
+// the brakes are kinda too fast.
+// also: the left joystick is sticking forward :/
+#define MINBACKMOTOR 920
 #define MINMOTOR 970
 #define MAXMOTOR 1300 // or 1300 for fast?
 #define MAXTURN 1050
 #define MAXSAFETY 1300 // don't ever allow values over this
 
-#define ACCEL 5
+#define ACCEL 2
 #define CATCHUP 3       // multiplier on top of ACCEL if one motor needs to catch the other
 #define DECEL 150       // estimated rate at which we decelerate with brakes on
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
