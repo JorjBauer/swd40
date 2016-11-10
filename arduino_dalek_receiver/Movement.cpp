@@ -14,11 +14,11 @@
 #define MINBACKMOTOR 920
 #define MINMOTOR 970
 #define MAXMOTOR 1300 // or 1300 for fast?
-#define MAXTURN 1050
+#define MAXTURN 1100
 #define MAXSAFETY 1300 // don't ever allow values over this
 
-#define ACCEL 2
-#define CATCHUP 3       // multiplier on top of ACCEL if one motor needs to catch the other
+#define ACCEL 3
+#define CATCHUP 5       // multiplier on top of ACCEL if one motor needs to catch the other
 #define DECEL 150       // estimated rate at which we decelerate with brakes on
 #define MINBRAKEVAL 250 // go to full-stop-zero when we're below this value
 
