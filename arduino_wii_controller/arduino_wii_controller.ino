@@ -270,7 +270,7 @@ int HandleSounds()
   // Sound-related buttons, in order of priority (only one will send at a time)
 
   if (ctrl.lzPressed()) {
-    rf_send("M8", 2);
+    rf_send("M5", 2);
     ret = 1;
   } else if (ctrl.rzPressed()) {
     rf_send("M4", 2);
