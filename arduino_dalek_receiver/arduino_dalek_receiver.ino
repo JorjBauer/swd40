@@ -107,7 +107,6 @@ bool brakeIsOn = false;
 #define kZERO 0
 
 /* cached settings from last update of remote */
-bool slowMode = true; // always start in slow mode
 
 void timerOneInterrupt()
 {
@@ -419,10 +418,10 @@ void loop()
 
         /* Slow/fast mode */
         case '+':
-          slowMode = false;
+          movement.setFastMode(true);
           break;
         case '-':
-          slowMode = true;
+          movement.setFastMode(false);
           break;
   
         /* Shoulder rotation commands */          

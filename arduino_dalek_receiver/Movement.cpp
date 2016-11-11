@@ -12,14 +12,14 @@
 // the brakes are kinda too fast.
 // also: the left joystick is sticking forward :/
 #define LMINBACKMOTOR 920
-#define LMINMOTOR 960
-#define LMAXMOTOR 1150 // or 1300 for fast?
-#define LMAXTURN 1060
+#define LMINMOTOR 970
+#define LSLOWMOTOR 1150 //slow mode max
+#define LMAXMOTOR 1300  // fast mode max
 
 #define RMINBACKMOTOR 920
 #define RMINMOTOR 970
-#define RMAXMOTOR 1150 // or 1300 for fast?
-#define RMAXTURN 1060
+#define RSLOWMOTOR 1150 // slow mode max
+#define RMAXMOTOR 1300  // fast mode max
 
 #define MAXSAFETY 1300 // don't ever allow values over this
 
@@ -96,6 +96,9 @@ static void OptimalThrust(int degs, int accel, int *l_motor, int *r_motor)
 // figure out how to make that best move the motors.
 void Movement::JoystickTarget(float x, float y)
 {
+  // make turns smaller by turning the circle in to an oval
+  x /= 2.0;
+
   // Turn x and y in to polar coordinates
   float distance = sqrt(x*x + y*y);
   float angle = degrees(atan2(y, x));
@@ -253,7 +256,7 @@ void Movement::Update()
   if (canMoveL) {
     l = performAccelerationWithConstraints(l, 
 					   lt,
-					   isTurning ? LMAXTURN : LMAXMOTOR,
+					   fastMode ? LMAXMOTOR : LSLOWMOTOR,
 					   accelLeft,
 					   &decelLeft,
 					   kLEFT);
@@ -262,7 +265,7 @@ void Movement::Update()
   if (canMoveR) {
     r = performAccelerationWithConstraints(r, 
 					   rt,
-					   isTurning ? RMAXTURN : RMAXMOTOR,
+					   fastMode ? RMAXMOTOR : RSLOWMOTOR,
 					   accelRight,
 					   &decelRight,
 					   kRIGHT);
@@ -281,9 +284,12 @@ int16_t Movement::percentToMotorDriverValue(int8_t pct,
   if (abs(pct) < 1)
     return 0;
 
-  int16_t maxVal = (whichMotor == kLEFT ? LMAXMOTOR : RMAXMOTOR);
-  if (isTurning)
-    maxVal = (whichMotor == kLEFT ? LMAXTURN : RMAXTURN);
+  int16_t maxVal;
+  if (fastMode) {
+    maxVal = (whichMotor == kLEFT ? LMAXMOTOR : RMAXMOTOR);
+  } else {
+    maxVal = (whichMotor == kLEFT ? LSLOWMOTOR : RSLOWMOTOR);
+  }
 
   int16_t ret = map(abs(pct), 1, 100, 
 		    whichMotor == kLEFT ? LMINMOTOR : RMINMOTOR, maxVal);
@@ -405,5 +411,10 @@ int16_t Movement::MotorDifferenceMagnitude(int16_t a, int16_t b, int8_t whichMot
   }
 
   return abs(a-b);
+}
+
+void Movement::setFastMode(bool isFast)
+{
+  fastMode = isFast;
 }
 

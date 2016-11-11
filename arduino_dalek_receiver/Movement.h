@@ -19,7 +19,7 @@ typedef unsigned short uint16_t;
 
 class Movement {
  public:
-  Movement() { actual_l = actual_r = target_l_pct = target_r_pct = 0; brakeEnabled = false; decelLeft = decelRight = false; stopped_l_time = stopped_r_time = 0; };
+  Movement() { actual_l = actual_r = target_l_pct = target_r_pct = 0; brakeEnabled = false; decelLeft = decelRight = false; stopped_l_time = stopped_r_time = 0; fastMode = false; };
   ~Movement() {};
 
   void Update();
@@ -37,6 +37,8 @@ class Movement {
   // difference between the two states (skipping the dead zone)
   int16_t MotorDifferenceMagnitude(int16_t a, int16_t b, int8_t whichMotor);
 
+  void setFastMode(bool isFast);
+
  protected:
   int16_t percentToMotorDriverValue(int8_t pct, bool isTurning, int8_t whichMotor);
   int16_t performAccelerationWithConstraints(int16_t current,
@@ -52,4 +54,5 @@ class Movement {
   int16_t stopped_l_time, stopped_r_time;
   bool brakeEnabled;
   bool decelLeft, decelRight; // whether or not we're intentionally decelerating each motor
+  bool fastMode;
 };
