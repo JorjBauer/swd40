@@ -12,13 +12,13 @@
 // the brakes are kinda too fast.
 // also: the left joystick is sticking forward :/
 #define LMINBACKMOTOR 920
-#define LMINMOTOR 980
-#define LMAXMOTOR 1200 // or 1300 for fast?
+#define LMINMOTOR 960
+#define LMAXMOTOR 1150 // or 1300 for fast?
 #define LMAXTURN 1060
 
 #define RMINBACKMOTOR 920
 #define RMINMOTOR 970
-#define RMAXMOTOR 1200 // or 1300 for fast?
+#define RMAXMOTOR 1150 // or 1300 for fast?
 #define RMAXTURN 1060
 
 #define MAXSAFETY 1300 // don't ever allow values over this

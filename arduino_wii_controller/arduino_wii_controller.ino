@@ -150,47 +150,47 @@ int HandleSlowFastMode()
 }
 
 // return x/y values that are floats [-100..100]
-uint8_t ReadLeftJoystick(float *x, float *y)
+uint8_t ReadRightJoystick(float *x, float *y)
 {
-  int lrAnalog = ctrl.leftStickX();
-  int udAnalog = ctrl.leftStickY();
+  int lrAnalog = ctrl.rightStickX();
+  int udAnalog = ctrl.rightStickY();
 
   *x = *y = 0;
 
-  // This is the left joystick, so its range is [0,63]. We have a center 
+  // This is the right joystick, so its range is [0,31]. We have a center 
   // position that we cached on startup, which is [rcx, rcy] and we know 
-  // the range of the "dead" middle spot we want, which is LEFT_CENTER_RANGE.
+  // the range of the "dead" middle spot we want, which is RIGHT_CENTER_RANGE.
   //
   // Turn all of this in to a percentage of left (negative) or right (positive)
   // and up (positive) or down (negative), from -1.0 to 1.0.
 
   // If the joystick is dead center, then it's nothing.
-  if (lrAnalog >= (lcx - LEFT_CENTER_RANGE) &&
-      lrAnalog <= (lcx + LEFT_CENTER_RANGE) &&
-      udAnalog >= (lcy - LEFT_CENTER_RANGE) &&
-      udAnalog <= (lcy + LEFT_CENTER_RANGE)) {
+  if (lrAnalog >= (rcx - RIGHT_CENTER_RANGE) &&
+      lrAnalog <= (rcx + RIGHT_CENTER_RANGE) &&
+      udAnalog >= (rcy - RIGHT_CENTER_RANGE) &&
+      udAnalog <= (rcy + RIGHT_CENTER_RANGE)) {
     // Dead center; do nothing.
     return 0;
   }
 
-  if (lrAnalog < lcx - LEFT_CENTER_RANGE) {
+  if (lrAnalog < rcx - RIGHT_CENTER_RANGE) {
     // Left-leaning
-    float range = (lcx - LEFT_CENTER_RANGE);
+    float range = (rcx - RIGHT_CENTER_RANGE);
     *x = -(1.0 - ((float)lrAnalog / range));
-  } else if (lrAnalog > lcx + LEFT_CENTER_RANGE) {
+  } else if (lrAnalog > rcx + RIGHT_CENTER_RANGE) {
     // Right-leaning
-    float range = 63.0 - (lcx + LEFT_CENTER_RANGE);
-    *x = (((float)lrAnalog - ((float)lcx + (float)LEFT_CENTER_RANGE) ) / range);
+    float range = 31.0 - (rcx + RIGHT_CENTER_RANGE);
+    *x = (((float)lrAnalog - ((float)rcx + (float)RIGHT_CENTER_RANGE) ) / range);
   }
 
-  if (udAnalog < lcy - LEFT_CENTER_RANGE) {
+  if (udAnalog < rcy - RIGHT_CENTER_RANGE) {
     // down-leaning
-    float range = (lcy - LEFT_CENTER_RANGE);
+    float range = (rcy - RIGHT_CENTER_RANGE);
     *y =  -(1.0 - ((float)udAnalog / range));
  
-  } else if (udAnalog > lcy + LEFT_CENTER_RANGE) {
-    float range = 63.0 - (lcy + LEFT_CENTER_RANGE);
-    *y = (float)(udAnalog - lcy - LEFT_CENTER_RANGE) / range;
+  } else if (udAnalog > rcy + RIGHT_CENTER_RANGE) {
+    float range = 31.0 - (rcy + RIGHT_CENTER_RANGE);
+    *y = (float)(udAnalog - rcy - RIGHT_CENTER_RANGE) / range;
   }
 
   // Translate: make the center region of the joystick "bigger" and the outer ring "smaller" so that it's easier to go slowly
@@ -220,7 +220,7 @@ uint8_t ReadLeftJoystick(float *x, float *y)
 int HandleMovement()
 {
   float x, y;
-  ReadLeftJoystick(&x, &y);
+  ReadRightJoystick(&x, &y);
 
   // If we are moving now (x or y are not zero), or if we *were* moving 
   // the last time we were called, then send an update.
@@ -258,19 +258,19 @@ int HandleShoulder()
     return 1;
   }
 
-  if (ctrl.rightStickX() < (rcx - RIGHT_CENTER_RANGE)) {
+  if (ctrl.leftStickX() < (lcx - LEFT_CENTER_RANGE)) {
     rf_send(')');
     return 1;
-  } else if (ctrl.rightStickX() > (rcx + RIGHT_CENTER_RANGE)) {
+  } else if (ctrl.leftStickX() > (lcx + LEFT_CENTER_RANGE)) {
     rf_send('(');
     return 1;
   }
 
   /* FIXME: validate that these are in the correct order */
-  if (ctrl.rightStickY() < (rcy - RIGHT_CENTER_RANGE)) {
+  if (ctrl.leftStickY() < (lcy - LEFT_CENTER_RANGE)) {
     rf_send('v');
     return 1;
-  } else if (ctrl.rightStickY() > (rcy + RIGHT_CENTER_RANGE)) {
+  } else if (ctrl.leftStickY() > (lcy + LEFT_CENTER_RANGE)) {
     rf_send('^');
     return 1;
   }
