@@ -14,6 +14,8 @@ typedef unsigned short uint16_t;
 #define radians(deg) ((deg)*DEG_TO_RAD)
 #define degrees(rad) ((rad)*RAD_TO_DEG)
 
+#define kLEFT 0
+#define kRIGHT 1
 
 class Movement {
  public:
@@ -33,15 +35,16 @@ class Movement {
   void Reset(); // called if there's an error in the engine...
 
   // difference between the two states (skipping the dead zone)
-  int16_t MotorDifferenceMagnitude(int16_t a, int16_t b);
+  int16_t MotorDifferenceMagnitude(int16_t a, int16_t b, int8_t whichMotor);
 
  protected:
-  int16_t percentToMotorDriverValue(int8_t pct, bool isTurning);
+  int16_t percentToMotorDriverValue(int8_t pct, bool isTurning, int8_t whichMotor);
   int16_t performAccelerationWithConstraints(int16_t current,
 					     int16_t target,
 					     int16_t maxVal,
 					     int8_t accel,
-					     bool *isDecelOut);
+					     bool *isDecelOut,
+					     int8_t whichMotor);
 
  private:
   int8_t target_l_pct, target_r_pct; // percentages, -100..100
