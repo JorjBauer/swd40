@@ -236,6 +236,21 @@ int HandleMovement()
   return 1;
 }
 
+int HandleBrakes()
+{
+  int ret = 0;
+  if (ctrl.leftShoulderPressed() || ctrl.leftShouldPressure()) {
+    // brakes
+    rf_send("m", 1);
+    ret = 1;
+  } else if (ctrl.rightShoulderPressed() || ctrl.rightShouldPressure()) {
+    // brakes
+    rf_send("m", 1);
+    ret = 1;
+  }
+  return ret;
+}
+
 int HandleShoulder()
 {
   if (ctrl.homePressed()) {
@@ -274,15 +289,6 @@ int HandleSounds()
     ret = 1;
   } else if (ctrl.rzPressed()) {
     rf_send("M4", 2);
-    ret = 1;
-  } else if (ctrl.leftShoulderPressed() || ctrl.leftShouldPressure()) {
-    // brakes
-    rf_send("m", 1);
-    ret = 1;
-  } else if (ctrl.rightShoulderPressed() || ctrl.rightShouldPressure()) {
-    // brakes
-    rf_send("m", 1);
-    ret = 1;
     ret = 1;
   } else if (ctrl.leftDPressed()) {
     rf_send("M6", 2);
@@ -358,8 +364,11 @@ void loop() {
   if (millis() >= last_data_update + 80) {
     // Read new values from the controller
     ctrl.update();
-  
-    int didSend = HandleMovement();
+
+    int didSend = HandleBrakes();
+    if (!didSend) {
+      didSend |= HandleMovement();
+    }
     didSend |= HandleSlowFastMode();
     didSend |= HandleShoulder();
     didSend |= HandleSounds();
