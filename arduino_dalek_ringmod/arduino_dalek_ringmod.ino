@@ -17,7 +17,7 @@
 #include <SerialFlash.h>
 
 // WAV gain of 0.2 is too much louder than the audio input :(
-#define WAV_GAIN 0.05
+#define WAV_GAIN 0.06
 #define MIC_GAIN 3.0
 
 // GUItool: begin automatically generated code
