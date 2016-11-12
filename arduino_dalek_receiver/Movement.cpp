@@ -12,7 +12,7 @@
 // the brakes are kinda too fast.
 // also: the left joystick is sticking forward :/
 #define LMINBACKMOTOR 920
-#define LMINMOTOR 970
+#define LMINMOTOR 960
 #define LSLOWMOTOR 1150 //slow mode max
 #define LMAXMOTOR 1300  // fast mode max
 
