@@ -313,7 +313,7 @@ void MakeMotorsGo(int8_t joystickX, int8_t joystickY)
   ledState = !ledState;
   digitalWrite(9, ledState);
 
-  movement.JoystickTarget(joystickX, joystickY);
+  movement.JoystickTarget(joystickY, joystickX);
 
   int8_t l, r;
   movement.GetMotorTargetPercentages(&l, &r);
