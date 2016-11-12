@@ -7,6 +7,7 @@
 #include <avr/wdt.h>
 #include <AH_MCP4921.h>
 #include <SoftwareSerial.h>
+#include <RingBuffer.h>
 
 #include "Movement.h"
 
@@ -34,6 +35,9 @@
 RFM69 radio;
 SPIFlash flash(FLASH_SS, 0xEF30); // 0xEF30 is windbond 4mbit
 SoftwareSerial softSerial(SSERRX, SSERTX);
+
+RingBuffer recvBuffer(32);
+
 /* Pins used.
  *  
  *  The Moteino communicates with its embedded RFM69 on pins 2, 10, 11, 12, 13.
@@ -386,23 +390,14 @@ void loop()
 
     CheckForWirelessHEX(radio, flash, true); // checks for the header 'FLX?' and reflashes new program if it finds one
 
-    bool wantStartMusic = false;
+    // Put all the radio data in a buffer quickly in case more data comes in while we're processing it
+    recvBuffer.addBytes(radio.DATA, radio.DATALEN);
+  }
 
-    for (unsigned char i=0; i < radio.DATALEN; i++) {
-#ifdef DEBUG2
-      // debugging
-      static char buf[2] = {0, 0};
-      buf[0] = radio.DATA[i];
-      Serial.println(buf);
-#endif
-      
-      if (wantStartMusic) {
-          startMusic( radio.DATA[i] );
-          wantStartMusic = false;
-          continue;
-      }
-  
-      switch (radio.DATA[i]) {
+  while (recvBuffer.hasData()) {
+    unsigned char d = recvBuffer.consumeByte();
+    
+      switch (d) {
         case '*':
           // Restart!
           //ForceRestart();
@@ -411,9 +406,9 @@ void loop()
 	/* Have a joystick position: set motor targets */
         case 'G':
           // We'll read the X/Y and then pulse...
-          // FIXME: assumes data exists
-          MakeMotorsGo(radio.DATA[i+1], radio.DATA[i+2]);
-          i += 2;
+          if (recvBuffer.count() >= 2) {
+            MakeMotorsGo(recvBuffer.consumeByte(), recvBuffer.consumeByte());
+          }
           break;
 
         /* Slow/fast mode */
@@ -440,7 +435,9 @@ void loop()
           break;
           
         case 'M':
-          wantStartMusic=true;
+          if (recvBuffer.count() >= 1) {
+            startMusic( recvBuffer.consumeByte() );
+          }
           break;
         case 'm':
           startMusic( MUSIC_NONE );
@@ -448,7 +445,6 @@ void loop()
           setBrake(true);
           break;
       }
-    }
   }
 }
 

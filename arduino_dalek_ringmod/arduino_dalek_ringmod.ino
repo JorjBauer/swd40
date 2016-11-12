@@ -16,6 +16,10 @@
 #include <SD.h>
 #include <SerialFlash.h>
 
+// WAV gain of 0.2 is too much louder than the audio input :(
+#define WAV_GAIN 0.05
+#define MIC_GAIN 3.0
+
 // GUItool: begin automatically generated code
 AudioInputI2S            i2s1;           //xy=67.4444465637207,220.77777481079102
 AudioSynthWaveform       waveform1;      //xy=82.33333206176758,78.22222137451172
@@ -113,8 +117,8 @@ void playFile(const char *filename)
 void playByIndex(int i)
 {
   mixer1.gain(0, 0.0);
-  mixer1.gain(2, 0.2);
-  mixer1.gain(3, 0.2);
+  mixer1.gain(2, WAV_GAIN);
+  mixer1.gain(3, WAV_GAIN);
   
   if (i >= 0 && i < FILE_COUNT) {
     playFile(fileNames[i]);
@@ -123,7 +127,7 @@ void playByIndex(int i)
 
 void playLiveInput()
 {
-  mixer1.gain(0, 2.0); // enable live voice input
+  mixer1.gain(0, MIC_GAIN); // enable live voice input
   mixer1.gain(2, 0.0); // disable the wav file channels
   mixer1.gain(3, 0.0);
 }

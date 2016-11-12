@@ -3,7 +3,7 @@
 #include <SPI.h>
 #include <SPIFlash.h>      //get it here: https://www.github.com/lowpowerlab/spiflash
 #include <WirelessHEX69.h> //get it here: https://github.com/LowPowerLab/WirelessProgramming/tree/master/WirelessHEX69
-
+#include <RingBuffer.h>    //get it here: https://github.com/JorjBauer/RingBuffer
 #include <Wire.h>
 #include "WiiClassic.h"
 
@@ -75,6 +75,10 @@ unsigned long led_timer = 0;
 
 /* Movement state - used to tell whether or not to keep sending data */
 bool wasMoving = false;
+
+/* Radio transmission buffer */
+#define RADIOBUFSIZE 16
+RingBuffer radioBuffer(RADIOBUFSIZE);
 
 void setup() {
 #ifdef DEBUG
@@ -328,7 +332,8 @@ void rf_send(const char *data, int datasize)
 #ifdef DEBUG
   Serial.println(data);
 #endif
-  radio.send(DALEK_NODEID, data, datasize, false); // no ACK, no retransmission.
+  // Queue data for later transmission, so we're sending it all at once.
+  radioBuffer.addBytes(data, datasize);
 }
 
 void rf_send(const char data)
@@ -337,6 +342,21 @@ void rf_send(const char data)
   Serial.println(data);
 #endif
   rf_send(&data, 1);
+}
+
+bool rf_sendQueue()
+{
+  // if we have any data queued for sending, send it now.
+  if (radioBuffer.hasData()) {
+    unsigned char data[RADIOBUFSIZE];
+    int datasize = radioBuffer.count();
+    for (int i=0; i<datasize; i++) {
+      data[i] = radioBuffer.consumeByte();
+    }
+    radio.send(DALEK_NODEID, data, datasize, false); // no ACK, no retransmission.
+    return true;
+  }
+  return false;
 }
 
 void loop() {
@@ -367,12 +387,15 @@ void loop() {
 
     int didSend = HandleBrakes();
     if (!didSend) {
+      // don't try to move if the brakes are on.
       didSend |= HandleMovement();
     }
     didSend |= HandleSlowFastMode();
     didSend |= HandleShoulder();
     didSend |= HandleSounds();
-  
+
+    rf_sendQueue();
+
     if (didSend) {
       led_brightness = 255;
       led_direction = -5;
